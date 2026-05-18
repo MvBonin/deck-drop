@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,8 +15,18 @@ from deckdrop.api.routes import downloads, games, peers, settings, status
 from deckdrop.api.websocket import router as ws_router
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="DeckDrop", version="2.0.0", docs_url="/api/docs")
+@asynccontextmanager
+async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    yield
+
+
+def create_app(lifespan: Any = None) -> FastAPI:
+    app = FastAPI(
+        title="DeckDrop",
+        version="2.0.0",
+        docs_url="/api/docs",
+        lifespan=lifespan or _default_lifespan,
+    )
 
     app.add_middleware(
         CORSMiddleware,

@@ -63,6 +63,6 @@ def test_downloads_empty(client):
     assert r.json() == []
 
 
-def test_download_not_implemented(client):
+def test_download_without_libtorrent_returns_503(client):
     r = client.post("/api/download", json={"peer_id": "abc", "game_id": "xyz"})
-    assert r.status_code == 501
+    assert r.status_code == 503

@@ -175,8 +175,25 @@ def get_magnet(game_id: str) -> dict[str, str]:
     g = s.library.get(game_id)
     if not g:
         raise HTTPException(404, "Game not found")
+
+    # Generate torrent on-demand if not yet available
     if not g.torrent.magnet:
-        raise HTTPException(404, "No magnet link available yet")
+        try:
+            from deckdrop.core.torrent import create_torrent_data, make_magnet
+
+            torrent_bytes = create_torrent_data(g.path)
+            magnet, info_hash = make_magnet(torrent_bytes)
+            # Persist magnet in deckdrop.toml
+            g.torrent.magnet = magnet
+            g.torrent.info_hash = info_hash
+            game_mod.save(g)
+            # Cache .torrent file for seeding
+            cache_path = s.cfg.torrent_cache / f"{g.id}.torrent"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_bytes(torrent_bytes)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
     return {"magnet": g.torrent.magnet, "info_hash": g.torrent.info_hash}
 
 
