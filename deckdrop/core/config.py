@@ -88,9 +88,7 @@ class Config:
 
     def remove_game_path(self, path: Path) -> None:
         p = str(path.expanduser().resolve())
-        self._data["paths"]["game_paths"] = [
-            x for x in self._data["paths"]["game_paths"] if x != p
-        ]
+        self._data["paths"]["game_paths"] = [x for x in self._data["paths"]["game_paths"] if x != p]
 
     # -- network --
 
@@ -142,6 +140,7 @@ def load() -> Config:
         data = _deep_merge(_DEFAULTS, on_disk)
     else:
         import copy
+
         data = copy.deepcopy(_DEFAULTS)
 
     # Ensure peer_id is always set

@@ -22,8 +22,8 @@ class DownloadOut(BaseModel):
     game_name: str
     peer_id: str
     peer_name: str
-    status: str          # queued | downloading | seeding | done | error | paused
-    progress: float      # 0.0–1.0
+    status: str  # queued | downloading | seeding | done | error | paused
+    progress: float  # 0.0–1.0
     speed_bytes_sec: int
     downloaded_bytes: int
     total_bytes: int

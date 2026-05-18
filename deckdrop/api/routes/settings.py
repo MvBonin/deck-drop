@@ -54,6 +54,7 @@ def update_settings(req: SettingsPatch) -> SettingsOut:
         cfg.user_name = req.user_name
     if req.download_dir is not None:
         from pathlib import Path
+
         cfg.download_dir = Path(req.download_dir)
     if req.max_upload_speed is not None:
         cfg.to_dict()["transfer"]["max_upload_speed"] = req.max_upload_speed
