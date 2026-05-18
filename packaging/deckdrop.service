@@ -1,0 +1,14 @@
+[Unit]
+Description=DeckDrop LAN Game Sharing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/deckdrop --headless
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
