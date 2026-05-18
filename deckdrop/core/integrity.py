@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 CHUNK_SIZE = 1024 * 1024  # 1 MB
 

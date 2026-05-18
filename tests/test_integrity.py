@@ -1,6 +1,4 @@
-from pathlib import Path
-
-from deckdrop.core.integrity import hash_file, hash_directory, verify_files
+from deckdrop.core.integrity import hash_directory, hash_file, verify_files
 
 
 def test_hash_file(tmp_path):

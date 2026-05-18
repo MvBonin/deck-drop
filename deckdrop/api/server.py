@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from deckdrop.api.routes import games, peers, downloads, settings, status
+from deckdrop.api.routes import downloads, games, peers, settings, status
 from deckdrop.api.websocket import router as ws_router
 
 

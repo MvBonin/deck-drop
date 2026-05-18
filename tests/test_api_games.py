@@ -44,6 +44,7 @@ def test_add_game_wizard(client, tmp_path):
 
 def test_add_game_existing_toml(client, tmp_path):
     from deckdrop.core import game as game_mod
+
     game_dir = tmp_path / "ExistingGame"
     game_dir.mkdir()
     info = game_mod.create_new(game_dir, name="Existing", added_by="someone")

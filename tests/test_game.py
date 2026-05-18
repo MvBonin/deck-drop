@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from deckdrop.core import game as game_mod
 
 

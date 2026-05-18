@@ -11,9 +11,7 @@ GET  /api/games/{id}/magnet  Magnet link for transfer
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
@@ -29,6 +27,7 @@ router = APIRouter(tags=["games"])
 
 # -- Pydantic schemas --
 
+
 class GameOut(BaseModel):
     id: str
     name: str
@@ -43,7 +42,7 @@ class GameOut(BaseModel):
     path: str
 
     @classmethod
-    def from_info(cls, g: GameInfo) -> "GameOut":
+    def from_info(cls, g: GameInfo) -> GameOut:
         return cls(
             id=g.id,
             name=g.name,
@@ -74,6 +73,7 @@ class PatchGameRequest(BaseModel):
 
 
 # -- Routes --
+
 
 @router.get("/games", response_model=list[GameOut])
 def list_games() -> list[GameOut]:
@@ -182,6 +182,7 @@ def get_magnet(game_id: str) -> dict[str, str]:
 
 # -- Background task --
 
+
 def _hash_game_files(info: GameInfo) -> None:
     """Hash all game files and update deckdrop.toml."""
     try:
@@ -192,4 +193,5 @@ def _hash_game_files(info: GameInfo) -> None:
     except Exception as exc:
         # Non-fatal: hashing can be slow, errors are logged but don't crash
         import logging
+
         logging.getLogger(__name__).error("Hashing failed for %s: %s", info.path, exc)

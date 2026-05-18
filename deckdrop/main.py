@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 
 
 def main() -> None:
@@ -35,10 +34,10 @@ def main() -> None:
 def _run(headless: bool, host: str, port_override: int | None) -> None:
     import uvicorn
 
-    from deckdrop.core import config as cfg_mod
-    from deckdrop.core.library import Library
     from deckdrop.api import state as app_state
     from deckdrop.api.server import create_app
+    from deckdrop.core import config as cfg_mod
+    from deckdrop.core.library import Library
 
     cfg = cfg_mod.load()
     library = Library()
@@ -54,8 +53,8 @@ def _run(headless: bool, host: str, port_override: int | None) -> None:
 
     if not headless:
         import threading
-        import webbrowser
         import time
+        import webbrowser
 
         def _open_browser() -> None:
             time.sleep(1.2)
