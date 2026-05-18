@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DeckDrop
+Comment=LAN-Spieleübertragung für Steam Deck
+Exec=deckdrop
+Icon=deckdrop
+Categories=Game;Network;FileTransfer;
+Keywords=steam;deck;lan;share;games;
+Terminal=false
+StartupNotify=true

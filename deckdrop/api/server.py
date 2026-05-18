@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,6 +14,25 @@ from fastapi.staticfiles import StaticFiles
 
 from deckdrop.api.routes import downloads, games, peers, settings, status
 from deckdrop.api.websocket import router as ws_router
+
+
+def _find_frontend() -> Path | None:
+    if getattr(sys, "frozen", False):
+        p = Path(sys._MEIPASS) / "frontend"  # type: ignore[attr-defined]
+        if p.exists():
+            return p
+    try:
+        from importlib.resources import files
+
+        p = Path(str(files("deckdrop"))) / "frontend"
+        if p.exists():
+            return p
+    except Exception:
+        pass
+    p = Path(__file__).parent.parent.parent / "frontend"
+    if p.exists():
+        return p
+    return None
 
 
 @asynccontextmanager
@@ -42,9 +62,8 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(status.router, prefix="/api")
     app.include_router(ws_router)
 
-    # Serve frontend static files
-    frontend_dir = Path(__file__).parent.parent.parent / "frontend"
-    if frontend_dir.exists():
+    frontend_dir = _find_frontend()
+    if frontend_dir:
         app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
 
     return app
