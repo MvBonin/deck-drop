@@ -36,10 +36,56 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
+
       - run: pip install ruff
+
       - name: Check formatting
         run: ruff format --check deckdrop/ tests/
+
+  frontend:
+    name: Frontend check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check JS syntax
+        run: |
+          for f in frontend/api.js frontend/app.js frontend/components/*.js; do
+            node --check "$f" || exit 1
+          done
+
+      - name: Verify required files exist
+        run: |
+          for f in \
+            frontend/index.html \
+            frontend/style.css \
+            frontend/app.js \
+            frontend/api.js \
+            frontend/components/Onboarding.js \
+            frontend/components/Nav.js \
+            frontend/components/GameCard.js \
+            frontend/components/MyGames.js \
+            frontend/components/AddGame.js \
+            frontend/components/Network.js \
+            frontend/components/Downloads.js \
+            frontend/components/Settings.js; do
+            [ -f "$f" ] || { echo "Missing: $f"; exit 1; }
+          done
+          echo "All frontend files present."
+
+      - name: Check import consistency
+        run: |
+          # Every component must import from htm/preact (no raw preact/h calls that bypass htm)
+          for f in frontend/components/*.js; do
+            grep -q "htm/preact" "$f" || { echo "Missing htm/preact import in $f"; exit 1; }
+          done
+          # api.js must not import from htm (it's a pure data module)
+          if grep -q "htm" frontend/api.js; then
+            echo "api.js should not import htm"; exit 1
+          fi
+          echo "Import consistency OK."
