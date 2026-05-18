@@ -1,0 +1,141 @@
+import { html } from 'htm/preact';
+import { useState, useEffect } from 'preact/hooks';
+import { api, fmtBytes } from '../api.js';
+
+export function Settings({ showToast }) {
+  const [cfg, setCfg]         = useState(null);
+  const [saving, setSaving]   = useState(false);
+
+  const load = async () => {
+    try { setCfg(await api.settings()); } catch {}
+  };
+  useEffect(() => { load(); }, []);
+
+  const update = (key, val) => setCfg(c => ({ ...c, [key]: val }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.saveSettings({
+        user_name:         cfg.user_name,
+        download_dir:      cfg.download_dir,
+        max_upload_speed:  cfg.max_upload_speed,
+        max_download_speed:cfg.max_download_speed,
+        seed_after_download: cfg.seed_after_download,
+      });
+      showToast('Einstellungen gespeichert ✓');
+    } catch {
+      showToast('Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!cfg) return html`<div class="empty-state"><div class="spinner"></div></div>`;
+
+  return html`
+    <div class="view">
+      <div class="view-header">
+        <div class="view-title">Einstellungen</div>
+      </div>
+
+      <p class="settings-section-title">Profil</p>
+      <div class="settings-section">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Name im Netzwerk</div>
+            <div class="settings-row-sub">Sichtbar für andere Peers</div>
+          </div>
+          <input
+            class="form-input"
+            style="max-width:200px"
+            value=${cfg.user_name}
+            onInput=${e => update('user_name', e.target.value)}
+          />
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Peer-ID</div>
+            <div class="settings-row-sub">Eindeutige Gerätekennung</div>
+          </div>
+          <code style="font-size:11px;color:var(--text-dim)">${cfg.peer_id.slice(0,16)}…</code>
+        </div>
+      </div>
+
+      <p class="settings-section-title">Dateien</p>
+      <div class="settings-section">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Download-Ordner</div>
+            <div class="settings-row-sub">Neue Spiele werden hier gespeichert</div>
+          </div>
+          <input
+            class="form-input"
+            style="max-width:240px;font-size:12px"
+            value=${cfg.download_dir}
+            onInput=${e => update('download_dir', e.target.value)}
+          />
+        </div>
+      </div>
+
+      <p class="settings-section-title">Transfer</p>
+      <div class="settings-section">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Nach Download seeden</div>
+            <div class="settings-row-sub">Teile Daten mit anderen Peers</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" checked=${cfg.seed_after_download} onChange=${e => update('seed_after_download', e.target.checked)} />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Upload-Limit</div>
+            <div class="settings-row-sub">0 = unbegrenzt (KB/s)</div>
+          </div>
+          <input
+            class="form-input"
+            style="max-width:100px"
+            type="number"
+            min="0"
+            value=${cfg.max_upload_speed}
+            onInput=${e => update('max_upload_speed', parseInt(e.target.value)||0)}
+          />
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Download-Limit</div>
+            <div class="settings-row-sub">0 = unbegrenzt (KB/s)</div>
+          </div>
+          <input
+            class="form-input"
+            style="max-width:100px"
+            type="number"
+            min="0"
+            value=${cfg.max_download_speed}
+            onInput=${e => update('max_download_speed', parseInt(e.target.value)||0)}
+          />
+        </div>
+      </div>
+
+      <p class="settings-section-title">Netzwerk</p>
+      <div class="settings-section">
+        <div class="settings-row">
+          <div class="settings-row-label">API-Port</div>
+          <code style="color:var(--text-dim)">${cfg.port}</code>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-label">Torrent-Port</div>
+          <code style="color:var(--text-dim)">${cfg.torrent_port}</code>
+        </div>
+      </div>
+
+      <div style="padding:16px 20px">
+        <button class="btn btn-primary" onClick=${save} disabled=${saving}>
+          ${saving ? html`<span class="spinner"></span>` : 'Speichern'}
+        </button>
+      </div>
+    </div>`;
+}

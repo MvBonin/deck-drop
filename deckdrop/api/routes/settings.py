@@ -28,6 +28,7 @@ class SettingsPatch(BaseModel):
     max_upload_speed: int | None = None
     max_download_speed: int | None = None
     seed_after_download: bool | None = None
+    onboarding_complete: bool | None = None
 
 
 @router.get("/settings", response_model=SettingsOut)
@@ -62,6 +63,8 @@ def update_settings(req: SettingsPatch) -> SettingsOut:
         cfg.to_dict()["transfer"]["max_download_speed"] = req.max_download_speed
     if req.seed_after_download is not None:
         cfg.to_dict()["transfer"]["seed_after_download"] = req.seed_after_download
+    if req.onboarding_complete is not None:
+        cfg.onboarding_complete = req.onboarding_complete
 
     save_cfg(cfg)
     return get_settings()
