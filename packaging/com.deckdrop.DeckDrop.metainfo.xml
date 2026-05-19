@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.deckdrop.DeckDrop</id>
+  <name>DeckDrop</name>
+  <summary>LAN game sharing for Steam Deck and Linux</summary>
+  <description>
+    <p>
+      DeckDrop lets you share games with friends on the same local network
+      without any internet connection, accounts, or external services.
+      Peer discovery is automatic via mDNS; transfers use BitTorrent
+      (LAN-only, no DHT, no external trackers).
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Automatic peer discovery via mDNS – no setup required</li>
+      <li>Fast LAN transfers via libtorrent (multi-peer)</li>
+      <li>Controller navigation for Steam Deck Gaming Mode</li>
+      <li>Dark UI accessible from any browser on the network</li>
+      <li>Steam cover art via App ID</li>
+      <li>No accounts, no internet, no DRM</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">com.deckdrop.DeckDrop.desktop</launchable>
+
+  <url type="homepage">https://github.com/MvBonin/deck-drop</url>
+  <url type="bugtracker">https://github.com/MvBonin/deck-drop/issues</url>
+
+  <developer id="com.deckdrop">
+    <name>DeckDrop Contributors</name>
+  </developer>
+
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>gamepad</control>
+  </supports>
+
+  <requires>
+    <internet>offline-only</internet>
+  </requires>
+
+  <releases>
+    <release version="2.0.0" date="2026-05-01">
+      <description>
+        <p>Python rewrite with Preact frontend and full controller navigation support.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1" />
+</component>
