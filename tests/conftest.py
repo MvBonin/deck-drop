@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 from deckdrop.api import state as app_state
 from deckdrop.api.server import create_app
@@ -15,12 +15,14 @@ from deckdrop.core.library import Library
 @pytest.fixture
 def make_game():
     """Factory: write a game to disk and return its GameInfo."""
+
     def _factory(parent_dir, name, added_by="test"):
         path = parent_dir / name.replace(" ", "_")
         path.mkdir(parents=True, exist_ok=True)
         info = game_mod.create_new(path, name=name, added_by=added_by)
         game_mod.save(info)
         return info
+
     return _factory
 
 

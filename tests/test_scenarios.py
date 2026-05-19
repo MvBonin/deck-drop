@@ -12,7 +12,6 @@ import asyncio
 import copy
 from unittest.mock import MagicMock
 
-import pytest
 import respx
 from fastapi.testclient import TestClient
 
@@ -59,9 +58,7 @@ async def test_peer_a_discovers_peer_b_and_sees_games(peer_b_setup, asgi_forward
     )
 
     with respx.mock:
-        respx.get(f"http://{peer_b_addr}:{peer_b_port}/api/games").mock(
-            side_effect=asgi_forwarder
-        )
+        respx.get(f"http://{peer_b_addr}:{peer_b_port}/api/games").mock(side_effect=asgi_forwarder)
         # Discovery fires: listener parses the service and calls registry_a.upsert_sync()
         listener.add_service(mock_zc, SERVICE_TYPE, f"deckdrop-bob.{SERVICE_TYPE}")
         assert registry_a.get(peer_b_id) is not None  # peer registered synchronously
@@ -84,9 +81,7 @@ async def test_peer_going_offline_excluded_from_network_games(peer_b_setup, asgi
 
     registry_a = PeerRegistry()
     with respx.mock:
-        respx.get(f"http://{peer_b_addr}:{peer_b_port}/api/games").mock(
-            side_effect=asgi_forwarder
-        )
+        respx.get(f"http://{peer_b_addr}:{peer_b_port}/api/games").mock(side_effect=asgi_forwarder)
         await registry_a.upsert(peer_b_id, "Bob", peer_b_addr, peer_b_port)
 
     assert len(registry_a.all_network_games()) == 1
@@ -102,9 +97,7 @@ async def test_peer_going_offline_excluded_from_network_games(peer_b_setup, asgi
     assert len(entry.games) == 1  # games cached on the entry, just hidden from network view
 
 
-async def test_peer_b_library_change_visible_on_next_fetch(
-    peer_b_setup, asgi_forwarder, make_game
-):
+async def test_peer_b_library_change_visible_on_next_fetch(peer_b_setup, asgi_forwarder, make_game):
     """/api/games reloads the library on every call, so games added to disk appear on next fetch."""
     peer_b_id = peer_b_setup["peer_id"]
     peer_b_addr = peer_b_setup["address"]
@@ -175,7 +168,7 @@ def test_two_library_instances_same_shared_directory(tmp_path, make_game):
 async def test_full_discovery_to_network_games_endpoint(
     tmp_path, monkeypatch, peer_b_setup, asgi_forwarder
 ):
-    """End-to-end: discovery event populates registry, GET /api/network/games returns Peer B's game."""
+    """Discovery fires → registry populated → GET /api/network/games returns Peer B's games."""
     peer_b_id = peer_b_setup["peer_id"]
     peer_b_addr = peer_b_setup["address"]
     peer_b_port = peer_b_setup["port"]
@@ -194,9 +187,7 @@ async def test_full_discovery_to_network_games_endpoint(
 
     # Phase 1: discovery + game fetch (state = Peer B from peer_b_setup fixture)
     with respx.mock:
-        respx.get(f"http://{peer_b_addr}:{peer_b_port}/api/games").mock(
-            side_effect=asgi_forwarder
-        )
+        respx.get(f"http://{peer_b_addr}:{peer_b_port}/api/games").mock(side_effect=asgi_forwarder)
         listener.add_service(mock_zc, SERVICE_TYPE, f"deckdrop-bob.{SERVICE_TYPE}")
         await registry_a._fetch_games(peer_b_id, peer_b_addr, peer_b_port)
 
