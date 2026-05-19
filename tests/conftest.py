@@ -5,11 +5,18 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from deckdrop.api import deps as deps_mod
 from deckdrop.api import state as app_state
 from deckdrop.api.server import create_app
 from deckdrop.core import config as cfg_mod
 from deckdrop.core import game as game_mod
 from deckdrop.core.library import Library
+
+
+@pytest.fixture(autouse=True)
+def _allow_testclient_as_local(monkeypatch):
+    """Make Starlette's TestClient host ('testclient') pass the local_only check."""
+    monkeypatch.setattr(deps_mod, "_LOCAL_HOSTS", deps_mod._LOCAL_HOSTS | {"testclient"})
 
 
 @pytest.fixture

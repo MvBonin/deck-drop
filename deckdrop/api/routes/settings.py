@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from deckdrop.api import state as app_state
+from deckdrop.api.deps import local_only
 from deckdrop.core.config import save as save_cfg
 
-router = APIRouter(tags=["settings"])
+router = APIRouter(tags=["settings"], dependencies=[Depends(local_only)])
 
 
 class SettingsOut(BaseModel):

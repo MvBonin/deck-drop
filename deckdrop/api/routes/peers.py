@@ -4,12 +4,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from deckdrop.api import state as app_state
+from deckdrop.api.deps import local_only
 
-router = APIRouter(tags=["peers"])
+router = APIRouter(tags=["peers"], dependencies=[Depends(local_only)])
 
 
 class PeerOut(BaseModel):
