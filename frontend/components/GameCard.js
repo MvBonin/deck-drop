@@ -17,7 +17,7 @@ function CoverImage({ game }) {
   return html`<div class="card-cover-placeholder">${initial}</div>`;
 }
 
-export function GameCard({ game, mode = 'own', onAction, disabled }) {
+export function GameCard({ game, mode = 'own', onAction, onEdit, disabled }) {
   const unavailable = mode === 'own' && !game.available;
   const size = game.size_bytes ? fmtBytes(game.size_bytes) : '–';
 
@@ -43,14 +43,27 @@ export function GameCard({ game, mode = 'own', onAction, disabled }) {
         <div class="card-meta">${size}${game.peer_name ? html` · <span>${game.peer_name}</span>` : ''}</div>
         ${unavailable
           ? html`<span class="unavailable-chip">Nicht verfügbar</span>`
-          : html`<button
-              class=${'btn ' + (mode === 'own' ? 'btn-secondary' : 'btn-primary')}
-              onClick=${onAction}
-              disabled=${disabled}
-              tabIndex=${-1}
-            >
-              ${mode === 'own' ? '✓ Geteilt' : '↓ Laden'}
-            </button>`
+          : html`<div style="display:flex;gap:6px;align-items:center">
+              <button
+                class=${'btn ' + (mode === 'own' ? 'btn-secondary' : 'btn-primary')}
+                style=${mode === 'own' && onEdit ? 'flex:1' : ''}
+                onClick=${onAction}
+                disabled=${disabled}
+                tabIndex=${-1}
+              >
+                ${mode === 'own' ? '✓ Geteilt' : '↓ Laden'}
+              </button>
+              ${mode === 'own' && onEdit && html`
+                <button
+                  class="btn btn-ghost"
+                  style="padding:6px 10px;font-size:15px"
+                  onClick=${onEdit}
+                  tabIndex=${-1}
+                  title="Bearbeiten"
+                  aria-label="Spiel bearbeiten"
+                >✎</button>
+              `}
+            </div>`
         }
       </div>
     </div>`;

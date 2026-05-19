@@ -78,6 +78,11 @@ class Config:
         return Path(self._data["paths"]["torrent_cache"]).expanduser()
 
     @property
+    def downloads_state_path(self) -> Path:
+        base = Path(self._data["paths"]["torrent_cache"]).expanduser().parent
+        return base / "downloads-state.json"
+
+    @property
     def game_paths(self) -> list[Path]:
         return [Path(p).expanduser() for p in self._data["paths"]["game_paths"]]
 

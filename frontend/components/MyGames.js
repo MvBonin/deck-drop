@@ -3,12 +3,14 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { GameCard } from './GameCard.js';
 import { AddGame } from './AddGame.js';
+import { EditGame } from './EditGame.js';
 import { useGridNav } from '../app.js';
 
 export function MyGames({ wsEvent, showToast }) {
   const [games, setGames]       = useState([]);
   const [loading, setLoading]   = useState(true);
   const [showAdd, setShowAdd]   = useState(false);
+  const [editGame, setEditGame] = useState(null);
   const gridRef = useRef(null);
   useGridNav(gridRef);
 
@@ -40,6 +42,12 @@ export function MyGames({ wsEvent, showToast }) {
     } catch {}
   };
 
+  const onSaved = (updated) => {
+    setGames(gs => gs.map(g => g.id === updated.id ? updated : g));
+    setEditGame(null);
+    showToast(`„${updated.name}" gespeichert`);
+  };
+
   return html`
     <div class="view">
       <div class="view-header">
@@ -64,6 +72,7 @@ export function MyGames({ wsEvent, showToast }) {
                   game=${g}
                   mode="own"
                   onAction=${() => onRemove(g)}
+                  onEdit=${() => setEditGame(g)}
                 />
               `)}
             </div>`
@@ -77,5 +86,6 @@ export function MyGames({ wsEvent, showToast }) {
       >+</button>
 
       ${showAdd && html`<${AddGame} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
+      ${editGame && html`<${EditGame} game=${editGame} onClose=${() => setEditGame(null)} onSaved=${onSaved} />`}
     </div>`;
 }
