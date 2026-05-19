@@ -58,13 +58,19 @@ def update_settings(req: SettingsPatch) -> SettingsOut:
 
         cfg.download_dir = Path(req.download_dir)
     if req.max_upload_speed is not None:
-        cfg.to_dict()["transfer"]["max_upload_speed"] = req.max_upload_speed
+        cfg.max_upload_speed = req.max_upload_speed
     if req.max_download_speed is not None:
-        cfg.to_dict()["transfer"]["max_download_speed"] = req.max_download_speed
+        cfg.max_download_speed = req.max_download_speed
     if req.seed_after_download is not None:
-        cfg.to_dict()["transfer"]["seed_after_download"] = req.seed_after_download
+        cfg.seed_after_download = req.seed_after_download
     if req.onboarding_complete is not None:
         cfg.onboarding_complete = req.onboarding_complete
 
     save_cfg(cfg)
+
+    # Apply rate limits to running transfer session immediately
+    transfer = s.transfer
+    if transfer is not None and hasattr(transfer, "apply_rate_limits"):
+        transfer.apply_rate_limits()
+
     return get_settings()

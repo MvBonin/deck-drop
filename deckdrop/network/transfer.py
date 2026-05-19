@@ -77,9 +77,26 @@ class TransferManager:
         self._handles: dict[str, _Handle] = {}  # download_id → _Handle
         self._library = None  # injected after init via set_library()
         self._poll_task: asyncio.Task | None = None
+        if cfg.max_upload_speed or cfg.max_download_speed:
+            self.apply_rate_limits()
 
     def set_library(self, library: object) -> None:
         self._library = library
+
+    def apply_rate_limits(self) -> None:
+        """Apply upload/download speed limits from config to the libtorrent session."""
+        _lt()  # verify installed
+        self._session.apply_settings(
+            {
+                "upload_rate_limit": self._cfg.max_upload_speed,
+                "download_rate_limit": self._cfg.max_download_speed,
+            }
+        )
+        log.debug(
+            "Rate limits set: up=%s down=%s bytes/s",
+            self._cfg.max_upload_speed,
+            self._cfg.max_download_speed,
+        )
 
     def start_polling(self) -> None:
         """Start the async background loop. Call after the event loop is running."""

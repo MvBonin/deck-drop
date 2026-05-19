@@ -110,13 +110,25 @@ class Config:
     def seed_after_download(self) -> bool:
         return self._data["transfer"]["seed_after_download"]
 
+    @seed_after_download.setter
+    def seed_after_download(self, value: bool) -> None:
+        self._data["transfer"]["seed_after_download"] = value
+
     @property
     def max_upload_speed(self) -> int:
         return self._data["transfer"]["max_upload_speed"]
 
+    @max_upload_speed.setter
+    def max_upload_speed(self, value: int) -> None:
+        self._data["transfer"]["max_upload_speed"] = value
+
     @property
     def max_download_speed(self) -> int:
         return self._data["transfer"]["max_download_speed"]
+
+    @max_download_speed.setter
+    def max_download_speed(self, value: int) -> None:
+        self._data["transfer"]["max_download_speed"] = value
 
     def to_dict(self) -> dict[str, Any]:
         return self._data
