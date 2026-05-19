@@ -40,6 +40,7 @@ def remote_client(tmp_path, monkeypatch):
 
 # ── Peer-accessible endpoints: must work from remote ──────────────────────────
 
+
 def test_get_games_open_to_peers(remote_client):
     r = remote_client.get("/api/games")
     assert r.status_code == 200
@@ -52,24 +53,29 @@ def test_get_status_open_to_peers(remote_client):
 
 # ── Local-only endpoints: must return 403 from remote ─────────────────────────
 
-@pytest.mark.parametrize("method,path,body", [
-    ("GET",    "/api/settings",          None),
-    ("PUT",    "/api/settings",          {"user_name": "evil"}),
-    ("POST",   "/api/games",             {"path": "/tmp/game", "name": "Hack"}),
-    ("PATCH",  "/api/games/deadbeef",    {"name": "Hack"}),
-    ("DELETE", "/api/games/deadbeef",    None),
-    ("GET",    "/api/downloads",         None),
-    ("POST",   "/api/download",          {"peer_id": "x", "game_id": "y"}),
-    ("DELETE", "/api/downloads/abc",     None),
-    ("GET",    "/api/peers",             None),
-    ("GET",    "/api/network/games",     None),
-])
+
+@pytest.mark.parametrize(
+    "method,path,body",
+    [
+        ("GET", "/api/settings", None),
+        ("PUT", "/api/settings", {"user_name": "evil"}),
+        ("POST", "/api/games", {"path": "/tmp/game", "name": "Hack"}),
+        ("PATCH", "/api/games/deadbeef", {"name": "Hack"}),
+        ("DELETE", "/api/games/deadbeef", None),
+        ("GET", "/api/downloads", None),
+        ("POST", "/api/download", {"peer_id": "x", "game_id": "y"}),
+        ("DELETE", "/api/downloads/abc", None),
+        ("GET", "/api/peers", None),
+        ("GET", "/api/network/games", None),
+    ],
+)
 def test_local_only_endpoint_rejects_remote(remote_client, method, path, body):
     r = remote_client.request(method, path, json=body)
     assert r.status_code == 403, f"{method} {path} should return 403 for remote clients"
 
 
 # ── Same endpoints must work from localhost ────────────────────────────────────
+
 
 def test_settings_accessible_from_localhost(client):
     r = client.get("/api/settings")
