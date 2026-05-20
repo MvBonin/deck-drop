@@ -1,0 +1,45 @@
+{
+  "id": "com.deckdrop.DeckDrop",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "24.08",
+  "sdk": "org.freedesktop.Sdk",
+  "sdk-extensions": [
+    "org.freedesktop.Sdk.Extension.python3.12"
+  ],
+  "command": "deckdrop-wrapper",
+  "finish-args": [
+    "--share=network",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--filesystem=home",
+    "--talk-name=org.freedesktop.Avahi",
+    "--system-talk-name=org.freedesktop.Avahi"
+  ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/python3.12/bin",
+    "env": {
+      "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    }
+  },
+  "modules": [
+    "python3-deckdrop-deps.json",
+    {
+      "name": "deckdrop",
+      "buildsystem": "simple",
+      "build-commands": [
+        "pip3 install --prefix=/app --no-build-isolation --no-deps .",
+        "install -m755 packaging/deckdrop-wrapper.sh /app/bin/deckdrop-wrapper",
+        "install -Dm644 packaging/deckdrop.svg /app/share/icons/hicolor/scalable/apps/com.deckdrop.DeckDrop.svg",
+        "install -Dm644 packaging/com.deckdrop.DeckDrop.desktop /app/share/applications/com.deckdrop.DeckDrop.desktop",
+        "install -Dm644 packaging/com.deckdrop.DeckDrop.metainfo.xml /app/share/metainfo/com.deckdrop.DeckDrop.metainfo.xml"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": ".."
+        }
+      ]
+    }
+  ]
+}

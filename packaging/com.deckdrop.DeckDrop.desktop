@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=DeckDrop
+Comment=LAN game sharing for Steam Deck and Linux
+Exec=deckdrop-wrapper --open
+Icon=com.deckdrop.DeckDrop
+Terminal=false
+Type=Application
+Categories=Game;Network;FileTransfer;
+Keywords=games;steam;deck;lan;share;transfer;
+StartupNotify=true
