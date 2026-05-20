@@ -1,6 +1,7 @@
 import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
+import { formatApiError } from '../errors.js';
 import { GameCard } from './GameCard.js';
 import { useGridNav } from '../app.js';
 
@@ -26,17 +27,29 @@ export function Network({ wsEvent, onNavigate, showToast }) {
 
   // React to peer events
   useEffect(() => {
-    if (wsEvent?.event === 'peer_online' || wsEvent?.event === 'peer_offline') load();
+    if (
+      wsEvent?.event === 'peer_online' ||
+      wsEvent?.event === 'peer_offline' ||
+      wsEvent?.event === 'peer_games_updated'
+    ) load();
   }, [wsEvent]);
 
+  // Poll while a host is still preparing games (hashes / magnet)
+  useEffect(() => {
+    const waiting = games.some(g => !g.has_torrent && !g.torrent_prep_error);
+    if (!waiting) return;
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, [games]);
+
   const startDownload = async (game) => {
-    setStarting(game.id);
+    setStarting(`${game.id}:${game.peer_id}`);
+    onNavigate('downloads');
     try {
       await api.startDl({ peer_id: game.peer_id, game_id: game.id });
       showToast(`Download gestartet: ${game.name}`);
-      onNavigate('downloads');
     } catch (err) {
-      showToast(`Fehler: ${err.status === 503 ? 'Transfer nicht verfügbar (libtorrent fehlt)' : 'Download fehlgeschlagen'}`);
+      showToast(`Fehler: ${formatApiError(err, 'download')}`);
     } finally {
       setStarting(null);
     }
@@ -96,7 +109,7 @@ export function Network({ wsEvent, onNavigate, showToast }) {
                     key=${g.id + g.peer_id}
                     game=${g}
                     mode="network"
-                    disabled=${starting === g.id}
+                    disabled=${starting === `${g.id}:${g.peer_id}`}
                     onAction=${() => startDownload(g)}
                   />
                 `)}

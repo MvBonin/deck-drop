@@ -134,7 +134,11 @@ def live_server_url(tmp_path_factory):
     with open(config_file, "wb") as fh:
         tomli_w.dump(config_data, fh)
 
-    env = {**os.environ, "DECKDROP_CONFIG": str(config_file)}
+    env = {
+        **os.environ,
+        "DECKDROP_CONFIG": str(config_file),
+        "DECKDROP_SKIP_SINGLE_INSTANCE": "1",
+    }
     proc_args = [sys.executable, "-m", "deckdrop.main", "--headless", "--port", str(port)]
     proc = subprocess.Popen(
         proc_args, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL

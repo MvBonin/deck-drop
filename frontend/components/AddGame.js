@@ -1,6 +1,7 @@
 import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
+import { formatApiError } from '../errors.js';
 
 export function AddGame({ onClose, onAdded }) {
   const [path, setPath]           = useState('');
@@ -42,7 +43,7 @@ export function AddGame({ onClose, onAdded }) {
         setNeeds(true);
         setError('');
       } else {
-        setError(err.body || 'Unbekannter Fehler.');
+        setError(formatApiError(err, 'game'));
       }
     } finally {
       setLoading(false);

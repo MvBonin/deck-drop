@@ -17,9 +17,17 @@ function CoverImage({ game }) {
   return html`<div class="card-cover-placeholder">${initial}</div>`;
 }
 
-export function GameCard({ game, mode = 'own', onAction, onEdit, disabled }) {
+export function GameCard({ game, mode = 'own', onAction, onEdit, disabled, prepProgress }) {
   const unavailable = mode === 'own' && !game.available;
   const size = game.size_bytes ? fmtBytes(game.size_bytes) : '–';
+  const hostPreparing = mode === 'network'
+    && !game.has_torrent
+    && !game.torrent_prep_error;
+  const ownPreparing = mode === 'own' && game.torrent_preparing;
+  const prepPct = Math.round(
+    (prepProgress ?? game.torrent_prep_progress ?? 0) * 100,
+  );
+  const prepFailed = mode === 'own' && !!game.torrent_prep_error;
 
   const handleKey = (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && !disabled && !unavailable) {
@@ -40,7 +48,34 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, disabled }) {
       <${CoverImage} game=${game} />
       <div class="card-body">
         <div class="card-name">${game.name}</div>
-        <div class="card-meta">${size}${game.peer_name ? html` · <span>${game.peer_name}</span>` : ''}</div>
+        <div class="card-meta">
+          ${size}
+          ${mode === 'network' && game.peer_count != null && html`
+            · <span>${game.peer_count} Peer${game.peer_count !== 1 ? 's' : ''}</span>
+          `}
+          ${mode === 'network' && game.peer_count > 1 && game.peer_name && html`
+            · <span>${game.peer_name}</span>
+          `}
+          ${mode === 'own' && game.source_peer_name && html`
+            · <span>von ${game.source_peer_name}</span>
+          `}
+        </div>
+        ${hostPreparing && html`
+          <div class="card-prep">
+            <div class="card-prep-label">Game-Hashes berechnen…</div>
+          </div>
+        `}
+        ${ownPreparing && html`
+          <div class="card-prep">
+            <div class="card-prep-label">Game-Hashes berechnen… ${prepPct}%</div>
+            <div class="progress-bar" role="progressbar" aria-valuenow=${prepPct} aria-valuemin="0" aria-valuemax="100">
+              <div class="progress-fill" style="width:${prepPct}%"></div>
+            </div>
+          </div>
+        `}
+        ${prepFailed && html`
+          <span class="unavailable-chip" style="margin-bottom:6px">Vorbereitung fehlgeschlagen</span>
+        `}
         ${unavailable
           ? html`<span class="unavailable-chip">Nicht verfügbar</span>`
           : html`<div style="display:flex;gap:6px;align-items:center">
@@ -48,10 +83,16 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, disabled }) {
                 class=${'btn ' + (mode === 'own' ? 'btn-secondary' : 'btn-primary')}
                 style=${mode === 'own' && onEdit ? 'flex:1' : ''}
                 onClick=${onAction}
-                disabled=${disabled}
+                disabled=${disabled || ownPreparing || hostPreparing}
                 tabIndex=${-1}
               >
-                ${mode === 'own' ? '✓ Geteilt' : '↓ Laden'}
+                ${hostPreparing
+                  ? '⏳ Bitte warten…'
+                  : ownPreparing
+                    ? '⏳ Hashes…'
+                    : mode === 'own'
+                      ? '✓ Geteilt'
+                      : '↓ Laden'}
               </button>
               ${mode === 'own' && onEdit && html`
                 <button

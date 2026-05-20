@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 import httpx
 import pytest
 import respx
@@ -50,11 +53,23 @@ def test_all_network_games_empty(registry):
 
 def test_all_network_games_injects_peer_info(registry):
     registry.upsert_sync("p1", "Alice", "192.168.1.10", 7373)
-    registry.get("p1").games = [{"id": "abc", "name": "Celeste"}]
+    registry.get("p1").games = [{"id": "abc", "name": "Celeste", "size_bytes": 100}]
     games = registry.all_network_games()
     assert len(games) == 1
     assert games[0]["peer_id"] == "p1"
     assert games[0]["peer_name"] == "Alice"
+    assert games[0]["peer_count"] == 1
+
+
+def test_all_network_games_groups_same_title(registry):
+    registry.upsert_sync("p1", "Alice", "192.168.1.10", 7373)
+    registry.upsert_sync("p2", "Bob", "192.168.1.11", 7373)
+    registry.get("p1").games = [{"id": "a1", "name": "Portal 2", "size_bytes": 500, "has_torrent": True}]
+    registry.get("p2").games = [{"id": "b1", "name": "Portal 2", "size_bytes": 500, "has_torrent": False}]
+    games = registry.all_network_games()
+    assert len(games) == 1
+    assert games[0]["peer_count"] == 2
+    assert set(games[0]["peer_names"]) == {"Alice", "Bob"}
 
 
 def test_all_network_games_excludes_offline(registry):
@@ -78,6 +93,27 @@ async def test_fetch_games_on_upsert(registry):
 
 
 @pytest.mark.asyncio
+async def test_upsert_sync_from_other_thread_fetches_games(registry):
+    """mDNS callbacks run outside the asyncio loop; upsert_sync must still fetch games."""
+    loop = asyncio.get_running_loop()
+    registry.bind_loop(loop)
+
+    with respx.mock:
+        respx.get("http://192.168.1.10:7373/api/games").mock(
+            return_value=httpx.Response(200, json=[{"id": "g1", "name": "Portal 2"}])
+        )
+
+        def _discover_from_zeroconf_thread() -> None:
+            registry.upsert_sync("p1", "Bob", "192.168.1.10", 7373)
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            await loop.run_in_executor(pool, _discover_from_zeroconf_thread)
+        await asyncio.sleep(0.05)
+
+    assert registry.get_games("p1")[0]["name"] == "Portal 2"
+
+
+@pytest.mark.asyncio
 async def test_fetch_games_handles_timeout(registry):
     with respx.mock:
         respx.get("http://192.168.1.10:7373/api/games").mock(
@@ -87,3 +123,27 @@ async def test_fetch_games_handles_timeout(registry):
 
     # Should not raise; games remain empty
     assert registry.get_games("p1") == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_all_online_updates_games(registry):
+    with respx.mock:
+        route = respx.get("http://192.168.1.10:7373/api/games")
+        route.mock(return_value=httpx.Response(200, json=[{"id": "g1", "name": "Portal 2"}]))
+        await registry.upsert("p1", "Bob", "192.168.1.10", 7373)
+        assert len(registry.get_games("p1")) == 1
+
+        route.mock(return_value=httpx.Response(200, json=[
+            {"id": "g1", "name": "Portal 2"},
+            {"id": "g2", "name": "Half-Life"},
+        ]))
+        await registry.refresh_all_online()
+
+    games = registry.get_games("p1")
+    assert len(games) == 2
+
+
+def test_games_changed_detects_new_game(registry):
+    assert PeerRegistry._games_changed([], [{"id": "a"}]) is True
+    assert PeerRegistry._games_changed([{"id": "a"}], [{"id": "a"}]) is False
+    assert PeerRegistry._games_changed([{"id": "a"}], [{"id": "b"}]) is True

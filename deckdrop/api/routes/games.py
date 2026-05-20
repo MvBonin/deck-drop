@@ -20,6 +20,7 @@ from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
 from deckdrop.core import game as game_mod
 from deckdrop.core import integrity
+from deckdrop.core import torrent_prep
 from deckdrop.core.config import save as save_cfg
 from deckdrop.core.game import GameInfo
 
@@ -40,10 +41,28 @@ class GameOut(BaseModel):
     updated_at: str
     steam_app_id: int | None
     has_torrent: bool
+    source_peer_name: str | None = None
+    torrent_preparing: bool = False
+    torrent_prep_progress: float | None = None
+    torrent_prep_error: str | None = None
     path: str
 
     @classmethod
     def from_info(cls, g: GameInfo) -> GameOut:
+        cfg = app_state.get().cfg
+        prep_error = torrent_prep.get_prep_error(g.id)
+        has_torrent = bool(g.torrent.magnet)
+        # Only show prep while actively hashing or truly missing (not when cache exists)
+        preparing = torrent_prep.is_preparing(g.id) or (
+            not has_torrent
+            and prep_error is None
+            and not torrent_prep.has_cached_torrent(cfg, g.id)
+        )
+        prep_progress: float | None = None
+        if preparing:
+            prep_progress = torrent_prep.get_progress(g.id)
+            if prep_progress is None:
+                prep_progress = 0.0
         return cls(
             id=g.id,
             name=g.name,
@@ -54,7 +73,11 @@ class GameOut(BaseModel):
             added_by=g.added_by,
             updated_at=g.updated_at,
             steam_app_id=g.steam.app_id,
-            has_torrent=bool(g.torrent.magnet),
+            has_torrent=has_torrent,
+            source_peer_name=g.origin.peer_name or None,
+            torrent_preparing=preparing,
+            torrent_prep_progress=prep_progress,
+            torrent_prep_error=prep_error,
             path=str(g.path),
         )
 
@@ -80,6 +103,7 @@ class PatchGameRequest(BaseModel):
 def list_games() -> list[GameOut]:
     s = app_state.get()
     s.library.reload(s.cfg)
+    torrent_prep.restore_all_cached(s.library, s.cfg, s.transfer)
     return [GameOut.from_info(g) for g in s.library.all()]
 
 
@@ -88,7 +112,7 @@ def get_game(game_id: str) -> GameOut:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Game not found")
+        raise HTTPException(404, "Spiel nicht gefunden")
     return GameOut.from_info(g)
 
 
@@ -125,10 +149,15 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
         s.cfg.add_game_path(path)
         save_cfg(s.cfg)
 
+    if info.size_bytes <= 0:
+        info.size_bytes = integrity.dir_size(info.path)
+        game_mod.save(info)
+
     s.library.add(info)
 
-    # Hash files in the background
+    # Hash files and build torrent in the background (avoid blocking HTTP / OOM on large games)
     background_tasks.add_task(_hash_game_files, info)
+    background_tasks.add_task(torrent_prep.schedule_prepare, info.id)
 
     return GameOut.from_info(info)
 
@@ -138,7 +167,7 @@ def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Game not found")
+        raise HTTPException(404, "Spiel nicht gefunden")
 
     changed = False
     if req.name is not None:
@@ -162,7 +191,7 @@ def remove_game(game_id: str) -> None:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Game not found")
+        raise HTTPException(404, "Spiel nicht gefunden")
 
     # Remove from individual paths list if it was there
     s.cfg.remove_game_path(g.path)
@@ -175,25 +204,23 @@ def get_magnet(game_id: str) -> dict[str, str]:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Game not found")
+        raise HTTPException(404, "Spiel nicht gefunden")
 
-    # Generate torrent on-demand if not yet available
     if not g.torrent.magnet:
-        try:
-            from deckdrop.core.torrent import create_torrent_data, make_magnet
+        torrent_prep.restore_from_cache(game_id)
+    if not g.torrent.magnet:
+        prep_err = torrent_prep.get_prep_error(game_id)
+        if prep_err:
+            raise HTTPException(503, f"Torrent konnte nicht erzeugt werden: {prep_err}") from None
+        torrent_prep.schedule_prepare(game_id)
+        raise HTTPException(
+            409,
+            "Torrent wird vorbereitet – bitte kurz warten und erneut versuchen.",
+        )
 
-            torrent_bytes = create_torrent_data(g.path)
-            magnet, info_hash = make_magnet(torrent_bytes)
-            # Persist magnet in deckdrop.toml
-            g.torrent.magnet = magnet
-            g.torrent.info_hash = info_hash
-            game_mod.save(g)
-            # Cache .torrent file for seeding
-            cache_path = s.cfg.torrent_cache / f"{g.id}.torrent"
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_bytes(torrent_bytes)
-        except RuntimeError as exc:
-            raise HTTPException(503, str(exc)) from exc
+    cache_path = s.cfg.torrent_cache / f"{g.id}.torrent"
+    if s.transfer is not None and cache_path.is_file():
+        s.transfer.seed_from_cache(g.id, g.path, cache_path)
 
     return {"magnet": g.torrent.magnet, "info_hash": g.torrent.info_hash}
 

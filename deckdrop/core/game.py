@@ -29,6 +29,14 @@ class TorrentInfo:
 
 
 @dataclass
+class OriginInfo:
+    """LAN peer this copy was downloaded from (empty if added locally)."""
+
+    peer_id: str = ""
+    peer_name: str = ""
+
+
+@dataclass
 class GameInfo:
     # Stable 8-char hex ID that never changes
     id: str
@@ -45,6 +53,7 @@ class GameInfo:
 
     steam: SteamInfo = field(default_factory=SteamInfo)
     torrent: TorrentInfo = field(default_factory=TorrentInfo)
+    origin: OriginInfo = field(default_factory=OriginInfo)
     # filename → blake2b hex hash
     files: dict[str, str] = field(default_factory=dict)
 
@@ -89,6 +98,16 @@ class GameInfo:
                 }.items()
                 if v
             }
+        origin = self.origin
+        if origin.peer_id or origin.peer_name:
+            d["origin"] = {
+                k: v
+                for k, v in {
+                    "peer_id": origin.peer_id,
+                    "peer_name": origin.peer_name,
+                }.items()
+                if v
+            }
         return d
 
 
@@ -104,6 +123,7 @@ def load_from_path(game_path: Path) -> GameInfo | None:
     g = data.get("game", {})
     steam_data = data.get("steam", {})
     torrent_data = data.get("torrent", {})
+    origin_data = data.get("origin", {})
 
     return GameInfo(
         id=g.get("id", _new_id()),
@@ -126,6 +146,10 @@ def load_from_path(game_path: Path) -> GameInfo | None:
         torrent=TorrentInfo(
             info_hash=torrent_data.get("info_hash", ""),
             magnet=torrent_data.get("magnet", ""),
+        ),
+        origin=OriginInfo(
+            peer_id=origin_data.get("peer_id", ""),
+            peer_name=origin_data.get("peer_name", ""),
         ),
         files=data.get("files", {}),
     )

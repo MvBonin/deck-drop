@@ -9,6 +9,15 @@ from pathlib import Path
 CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 
+def dir_size(root: Path) -> int:
+    """Total bytes of all files under root (fast; no hashing)."""
+    total = 0
+    for path in root.rglob("*"):
+        if path.is_file() and path.name != "deckdrop.toml":
+            total += path.stat().st_size
+    return total
+
+
 def hash_file(path: Path, progress: Callable[[int], None] | None = None) -> str:
     """Return blake2b hex digest for a single file."""
     h = hashlib.blake2b()

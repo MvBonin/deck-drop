@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from deckdrop.api.routes import downloads, games, peers, settings, status
+from deckdrop.api.routes import downloads, games, peers, settings, shutdown, status
 from deckdrop.api.websocket import router as ws_router
 
 
@@ -60,6 +60,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(downloads.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
     app.include_router(status.router, prefix="/api")
+    app.include_router(shutdown.router, prefix="/api")
     app.include_router(ws_router)
 
     frontend_dir = _find_frontend()

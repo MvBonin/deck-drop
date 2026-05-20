@@ -7,6 +7,7 @@ RuntimeError with a clear message if it's not installed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 _LT_MISSING = "libtorrent is not installed. Install it with: pip install libtorrent"
@@ -32,14 +33,37 @@ _LAN_SETTINGS = {
 }
 
 
-def create_torrent_data(game_path: Path) -> bytes:
+def create_torrent_data(
+    game_path: Path,
+    on_progress: Callable[[float], None] | None = None,
+) -> bytes:
     """Create a .torrent file (as bytes) from a game directory."""
     lt = _lt()
+    if on_progress:
+        on_progress(0.02)
+
     fs = lt.file_storage()
     lt.add_files(fs, str(game_path))
     t = lt.create_torrent(fs)
     t.set_comment(f"DeckDrop – {game_path.name}")
-    lt.set_piece_hashes(t, str(game_path.parent))
+
+    num_pieces = max(int(t.num_pieces()), 1)
+
+    def _piece_progress(piece_index: int) -> None:
+        if on_progress:
+            # Hashing dominates runtime; map to 5–95 %
+            frac = min(1.0, (int(piece_index) + 1) / num_pieces)
+            on_progress(0.05 + 0.9 * frac)
+
+    try:
+        lt.set_piece_hashes(t, str(game_path.parent), _piece_progress)  # type: ignore[misc]
+    except TypeError:
+        lt.set_piece_hashes(t, str(game_path.parent))  # type: ignore[misc]
+        if on_progress:
+            on_progress(0.5)
+
+    if on_progress:
+        on_progress(0.98)
     return lt.bencode(t.generate())
 
 

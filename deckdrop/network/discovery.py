@@ -7,6 +7,7 @@ Service type: _deckdrop._tcp.local.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import socket
 from collections.abc import Callable
@@ -21,6 +22,27 @@ log = logging.getLogger(__name__)
 
 SERVICE_TYPE = "_deckdrop._tcp.local."
 PROTOCOL_VERSION = "2"
+
+
+def _pick_lan_address(addresses: list[str]) -> str | None:
+    """Prefer non-loopback IPv4 for cross-device HTTP fetches on the LAN."""
+    v4: list[str] = []
+    v6: list[str] = []
+    for raw in addresses:
+        host = raw.split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        if ip.is_loopback:
+            continue
+        if ip.version == 4:
+            v4.append(host)
+        else:
+            v6.append(host)
+    if v4:
+        return v4[0]
+    return v6[0] if v6 else None
 
 
 class _Listener(ServiceListener):
@@ -42,13 +64,13 @@ class _Listener(ServiceListener):
         peer_id = props.get("peer_id", "")
         if peer_id == self._own_peer_id:
             return None  # ignore ourselves
-        addresses = info.parsed_scoped_addresses()
-        if not addresses:
+        address = _pick_lan_address(info.parsed_scoped_addresses())
+        if not address:
             return None
         return {
             "peer_id": peer_id,
             "name": props.get("name", "unknown"),
-            "address": addresses[0],
+            "address": address,
             "port": int(props.get("port", info.port)),
         }
 

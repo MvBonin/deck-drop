@@ -67,6 +67,7 @@ def test_get_status_open_to_peers(remote_client):
         ("DELETE", "/api/downloads/abc", None),
         ("GET", "/api/peers", None),
         ("GET", "/api/network/games", None),
+        ("POST", "/api/shutdown", None),
     ],
 )
 def test_local_only_endpoint_rejects_remote(remote_client, method, path, body):
@@ -90,3 +91,13 @@ def test_peers_accessible_from_localhost(client):
 def test_downloads_accessible_from_localhost(client):
     r = client.get("/api/downloads")
     assert r.status_code == 200
+
+
+def test_shutdown_accessible_from_localhost(client, monkeypatch):
+    monkeypatch.setattr(
+        "deckdrop.api.routes.shutdown.threading.Thread",
+        lambda target, daemon=True: type("NoThread", (), {"start": lambda self: None})(),
+    )
+    r = client.post("/api/shutdown")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}

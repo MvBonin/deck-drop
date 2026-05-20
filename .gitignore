@@ -31,6 +31,7 @@ MANIFEST
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+!packaging/deckdrop.spec
 
 # Installer logs
 pip-log.txt
@@ -221,3 +222,8 @@ __marimo__/
 .flatpak-build/
 .flatpak-repo/
 DeckDrop.flatpak
+.build-python/
+.build-appimage-venv/
+DeckDrop-*.AppDir/
+DeckDrop-*-*.AppImage
+appimagetool

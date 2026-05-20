@@ -32,9 +32,14 @@ export const api = {
   netGames:     ()          => get('/api/network/games'),
   startDl:      (body)      => post('/api/download', body),
   downloads:    ()          => get('/api/downloads'),
-  cancelDl:     (id)        => del(`/api/downloads/${id}`),
+  pauseDl:      (id)        => post(`/api/downloads/${id}/pause`),
+  resumeDl:     (id)        => post(`/api/downloads/${id}/resume`),
+  retryDl:      (id)        => post(`/api/downloads/${id}/retry`),
+  removeDl:     (id, delFiles) =>
+    del(`/api/downloads/${id}?delete_files=${delFiles ? 'true' : 'false'}`),
   settings:     ()          => get('/api/settings'),
   saveSettings: (body)      => put('/api/settings', body),
+  shutdown:     ()          => post('/api/shutdown'),
 };
 
 export function fmtBytes(n) {

@@ -60,6 +60,7 @@ function App() {
         setWsEvent(msg);
         // Track active downloads count via WS for badge
         if (msg.event === 'download_progress') {
+          setView('downloads');
           setDownloads(prev => {
             const exists = prev.find(d => d.id === msg.data.id);
             if (exists) return prev.map(d => d.id === msg.data.id ? { ...d, ...msg.data } : d);

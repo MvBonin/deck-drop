@@ -40,6 +40,17 @@ deckdrop --port 8080 --open   # custom port + auto-open browser
 
 On Steam Deck: install the `.desktop` shortcut via `packaging/install.sh` to launch from Gaming Mode.
 
+### AppImage (alles in einer Datei)
+
+```bash
+bash packaging/build-appimage.sh
+chmod +x DeckDrop-*-x86_64.AppImage
+./DeckDrop-*-x86_64.AppImage          # Server + Browser
+./DeckDrop-*-x86_64.AppImage --kiosk  # Gaming Mode (Chromium Vollbild)
+```
+
+Enthält Python 3.12, alle Abhängigkeiten und libtorrent. Auf dem Steam Deck als Non-Steam-Spiel hinzufügen.
+
 ## Development
 
 ```bash

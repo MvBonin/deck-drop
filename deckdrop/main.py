@@ -16,6 +16,11 @@ def main() -> None:
         help="Run API server only, don't open browser",
     )
     parser.add_argument(
+        "--kiosk",
+        action="store_true",
+        help="Headless server + fullscreen Chromium app window (Steam Deck Gaming Mode)",
+    )
+    parser.add_argument(
         "--host",
         default="0.0.0.0",
         help="Bind host (default: 0.0.0.0)",
@@ -28,10 +33,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    _run(headless=args.headless, host=args.host, port_override=args.port)
+    _run(headless=args.headless or args.kiosk, kiosk=args.kiosk, host=args.host, port_override=args.port)
 
 
-def _run(headless: bool, host: str, port_override: int | None) -> None:
+def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = False) -> None:
+    import atexit
     from contextlib import asynccontextmanager
 
     import uvicorn
@@ -43,8 +49,18 @@ def _run(headless: bool, host: str, port_override: int | None) -> None:
     from deckdrop.core.library import Library
     from deckdrop.network.discovery import DiscoveryService
     from deckdrop.network.peer_registry import PeerRegistry
+    from deckdrop.single_instance import remove_pid_file, stop_other_instances, write_pid_file
 
     cfg = cfg_mod.load()
+    port = port_override or cfg.port
+
+    stopped = stop_other_instances(port, config_path=cfg_mod.CONFIG_PATH)
+    if stopped:
+        pids = ", ".join(str(p) for p in stopped)
+        print(f"Vorherige DeckDrop-Instanz beendet (PID {pids})")
+
+    write_pid_file(cfg_mod.CONFIG_PATH)
+    atexit.register(remove_pid_file, cfg_mod.CONFIG_PATH)
     library = Library()
     library.reload(cfg)
     peer_registry = PeerRegistry()
@@ -63,8 +79,6 @@ def _run(headless: bool, host: str, port_override: int | None) -> None:
 
     app_state.init(cfg, library, peer_registry, transfer)
 
-    port = port_override or cfg.port
-
     # Ensure directories exist
     cfg.download_dir.mkdir(parents=True, exist_ok=True)
     cfg.torrent_cache.mkdir(parents=True, exist_ok=True)
@@ -73,6 +87,13 @@ def _run(headless: bool, host: str, port_override: int | None) -> None:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        peer_registry.bind_loop(loop)
+        from deckdrop.core import torrent_prep
+
+        torrent_prep.bind_loop(loop)
         # Startup
         try:
             await discovery.start(cfg, peer_registry.upsert_sync, peer_registry.remove)
@@ -80,10 +101,24 @@ def _run(headless: bool, host: str, port_override: int | None) -> None:
             import logging
 
             logging.getLogger(__name__).warning("mDNS discovery unavailable: %s", exc)
+        peer_registry.start_refresh_loop()
         if transfer:
             transfer.start_polling()
+            transfer.seed_all_shared(library, cfg)
+
+        restored = torrent_prep.restore_all_cached(library, cfg, transfer)
+        if restored:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "Torrent cache restored for %d game(s)", restored
+            )
+        for g in library.all():
+            if not g.torrent.magnet and not torrent_prep.has_cached_torrent(cfg, g.id):
+                torrent_prep.schedule_prepare(g.id)
         yield
         # Shutdown
+        peer_registry.stop_refresh_loop()
         await discovery.stop()
         if transfer:
             transfer.shutdown()
@@ -100,6 +135,31 @@ def _run(headless: bool, host: str, port_override: int | None) -> None:
             webbrowser.open(f"http://localhost:{port}")
 
         threading.Thread(target=_open_browser, daemon=True).start()
+    elif kiosk:
+        import shutil
+        import subprocess
+        import threading
+        import time
+
+        url = f"http://127.0.0.1:{port}"
+
+        def _open_kiosk() -> None:
+            time.sleep(1.2)
+            for candidate in ("chromium", "google-chrome-stable", "google-chrome", "brave-browser"):
+                if shutil.which(candidate):
+                    subprocess.Popen(
+                        [
+                            candidate,
+                            f"--app={url}",
+                            "--window-size=1280,800",
+                            "--disable-features=TranslateUI",
+                        ],
+                        start_new_session=True,
+                    )
+                    return
+            print(f"No Chromium found. Open {url} manually.")
+
+        threading.Thread(target=_open_kiosk, daemon=True).start()
 
     print(f"DeckDrop running at http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")

@@ -20,6 +20,14 @@ def _make_service_info(peer_id: str, name: str, ip: str, port: int):
     return info
 
 
+def test_pick_lan_address_prefers_ipv4():
+    from deckdrop.network.discovery import _pick_lan_address
+
+    assert _pick_lan_address(["fe80::1", "192.168.1.5"]) == "192.168.1.5"
+    assert _pick_lan_address(["192.168.1.5"]) == "192.168.1.5"
+    assert _pick_lan_address(["127.0.0.1"]) is None
+
+
 def test_listener_calls_on_found():
     found = []
     lost = []

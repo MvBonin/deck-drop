@@ -23,6 +23,17 @@ def test_load_missing_returns_none(tmp_path):
     assert game_mod.load_from_path(tmp_path / "nonexistent") is None
 
 
+def test_origin_roundtrip(tmp_path):
+    info = game_mod.create_new(tmp_path, name="Portal 2", added_by="local")
+    info.origin.peer_id = "peer123"
+    info.origin.peer_name = "Steam Deck"
+    game_mod.save(info)
+
+    loaded = game_mod.load_from_path(tmp_path)
+    assert loaded.origin.peer_name == "Steam Deck"
+    assert loaded.origin.peer_id == "peer123"
+
+
 def test_bump_version(tmp_path):
     info = game_mod.create_new(tmp_path, name="Hollow Knight", added_by="carol")
     game_mod.save(info)

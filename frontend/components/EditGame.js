@@ -1,6 +1,7 @@
 import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
+import { formatApiError } from '../errors.js';
 
 export function EditGame({ game, onClose, onSaved }) {
   const [name, setName]         = useState(game.name || '');
@@ -29,7 +30,7 @@ export function EditGame({ game, onClose, onSaved }) {
       const updated = await api.patchGame(game.id, body);
       onSaved(updated);
     } catch (err) {
-      setError(err.body || 'Unbekannter Fehler.');
+      setError(formatApiError(err, 'game'));
     } finally {
       setLoading(false);
     }

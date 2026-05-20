@@ -3,7 +3,7 @@ Version=1.0
 Type=Application
 Name=DeckDrop
 Comment=LAN-Spieleübertragung
-Exec=chromium --app=http://localhost:7373 --window-size=1280,800 --disable-features=TranslateUI
+Exec=deckdrop --kiosk
 Icon=deckdrop
 Categories=Game;
 Terminal=false

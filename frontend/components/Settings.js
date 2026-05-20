@@ -1,10 +1,13 @@
 import { html } from 'htm/preact';
 import { useState, useEffect } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
+import { formatApiError } from '../errors.js';
 
 export function Settings({ showToast }) {
   const [cfg, setCfg]         = useState(null);
   const [saving, setSaving]   = useState(false);
+  const [showExit, setShowExit] = useState(false);
+  const [exiting, setExiting]   = useState(false);
 
   const load = async () => {
     try { setCfg(await api.settings()); } catch {}
@@ -12,6 +15,18 @@ export function Settings({ showToast }) {
   useEffect(() => { load(); }, []);
 
   const update = (key, val) => setCfg(c => ({ ...c, [key]: val }));
+
+  const confirmExit = async () => {
+    setExiting(true);
+    try {
+      await api.shutdown();
+      showToast('DeckDrop wird beendet…');
+    } catch (err) {
+      showToast(`Beenden fehlgeschlagen: ${formatApiError(err, 'settings')}`);
+      setExiting(false);
+      setShowExit(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -24,8 +39,8 @@ export function Settings({ showToast }) {
         seed_after_download: cfg.seed_after_download,
       });
       showToast('Einstellungen gespeichert ✓');
-    } catch {
-      showToast('Fehler beim Speichern');
+    } catch (err) {
+      showToast(`Fehler beim Speichern: ${formatApiError(err, 'settings')}`);
     } finally {
       setSaving(false);
     }
@@ -127,9 +142,21 @@ export function Settings({ showToast }) {
           <code style="color:var(--text-dim)">${cfg.port}</code>
         </div>
         <div class="settings-row">
-          <div class="settings-row-label">Torrent-Port</div>
+          <div class="settings-row-label">Sharing-Port</div>
           <code style="color:var(--text-dim)">${cfg.torrent_port}</code>
         </div>
+      </div>
+
+      <p class="settings-section-title">Anwendung</p>
+      <div class="settings-section">
+        <button
+          type="button"
+          class="btn btn-danger"
+          style="width:100%"
+          onClick=${() => setShowExit(true)}
+        >
+          DeckDrop beenden
+        </button>
       </div>
 
       <div style="padding:16px 20px">
@@ -137,5 +164,40 @@ export function Settings({ showToast }) {
           ${saving ? html`<span class="spinner"></span>` : 'Speichern'}
         </button>
       </div>
+
+      ${showExit && html`
+        <div
+          class="overlay"
+          onClick=${e => e.target === e.currentTarget && !exiting && setShowExit(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="DeckDrop beenden"
+        >
+          <div class="dialog">
+            <div class="dialog-title">DeckDrop beenden?</div>
+            <p class="dialog-text">
+              Server und LAN-Freigabe werden gestoppt. Laufende Downloads werden abgebrochen.
+            </p>
+            <div class="dialog-actions">
+              <button
+                type="button"
+                class="btn btn-ghost"
+                onClick=${() => setShowExit(false)}
+                disabled=${exiting}
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                class="btn btn-danger"
+                onClick=${confirmExit}
+                disabled=${exiting}
+              >
+                ${exiting ? html`<span class="spinner"></span>` : 'Beenden'}
+              </button>
+            </div>
+          </div>
+        </div>
+      `}
     </div>`;
 }
