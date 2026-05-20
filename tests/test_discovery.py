@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from deckdrop.network.discovery import DiscoveryService, _Listener
 
@@ -66,15 +66,19 @@ def test_listener_handles_missing_service_info_on_remove():
     assert lost == []
 
 
-def test_discovery_service_start_stop():
+async def test_discovery_service_start_stop():
     svc = DiscoveryService()
     with (
-        patch("deckdrop.network.discovery.Zeroconf") as MockZC,
+        patch("deckdrop.network.discovery.AsyncZeroconf") as MockAZC,
         patch("deckdrop.network.discovery.ServiceBrowser"),
         patch.object(DiscoveryService, "_local_ip", return_value="192.168.1.1"),
     ):
-        mock_zc = MagicMock()
-        MockZC.return_value = mock_zc
+        mock_azc = MagicMock()
+        mock_azc.async_register_service = AsyncMock()
+        mock_azc.async_unregister_service = AsyncMock()
+        mock_azc.async_close = AsyncMock()
+        mock_azc.zeroconf = MagicMock()
+        MockAZC.return_value = mock_azc
 
         import copy
 
@@ -86,9 +90,9 @@ def test_discovery_service_start_stop():
         data["user"]["name"] = "TestUser"
         cfg = Config(data)
 
-        svc.start(cfg, lambda *a: None, lambda p: None)
-        mock_zc.register_service.assert_called_once()
+        await svc.start(cfg, lambda *a: None, lambda p: None)
+        mock_azc.async_register_service.assert_called_once()
 
-        svc.stop()
-        mock_zc.unregister_service.assert_called_once()
-        mock_zc.close.assert_called_once()
+        await svc.stop()
+        mock_azc.async_unregister_service.assert_called_once()
+        mock_azc.async_close.assert_called_once()

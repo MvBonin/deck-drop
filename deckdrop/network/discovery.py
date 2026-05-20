@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from zeroconf import ServiceBrowser, ServiceInfo, ServiceListener, Zeroconf
+from zeroconf.asyncio import AsyncZeroconf
 
 from deckdrop.core.config import Config
 
@@ -73,11 +74,11 @@ class _Listener(ServiceListener):
 
 class DiscoveryService:
     def __init__(self) -> None:
-        self._zc: Zeroconf | None = None
+        self._zc: AsyncZeroconf | None = None
         self._browser: ServiceBrowser | None = None
         self._service_info: ServiceInfo | None = None
 
-    def start(
+    async def start(
         self,
         cfg: Config,
         on_peer_found: Callable[[str, str, str, int], None],
@@ -99,23 +100,23 @@ class DiscoveryService:
             },
         )
 
-        self._zc = Zeroconf()
-        self._zc.register_service(self._service_info)
+        self._zc = AsyncZeroconf()
+        await self._zc.async_register_service(self._service_info)
         self._browser = ServiceBrowser(
-            self._zc,
+            self._zc.zeroconf,
             SERVICE_TYPE,
             _Listener(cfg.peer_id, on_peer_found, on_peer_lost),
         )
         log.info("Discovery started as %s", service_name)
 
-    def stop(self) -> None:
+    async def stop(self) -> None:
         if self._zc and self._service_info:
             try:
-                self._zc.unregister_service(self._service_info)
+                await self._zc.async_unregister_service(self._service_info)
             except Exception:
                 pass
         if self._zc:
-            self._zc.close()
+            await self._zc.async_close()
             self._zc = None
         log.info("Discovery stopped")
 

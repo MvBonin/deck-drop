@@ -74,12 +74,17 @@ def _run(headless: bool, host: str, port_override: int | None) -> None:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup
-        discovery.start(cfg, peer_registry.upsert_sync, peer_registry.remove)
+        try:
+            await discovery.start(cfg, peer_registry.upsert_sync, peer_registry.remove)
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("mDNS discovery unavailable: %s", exc)
         if transfer:
             transfer.start_polling()
         yield
         # Shutdown
-        discovery.stop()
+        await discovery.stop()
         if transfer:
             transfer.shutdown()
 

@@ -8,10 +8,11 @@ on:
 
 jobs:
   test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (Python ${{ matrix.python-version }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12"]
 
     steps:
@@ -29,7 +30,7 @@ jobs:
         run: ruff check deckdrop/ tests/
 
       - name: Run tests
-        run: python -m pytest --tb=short -v
+        run: python -m pytest --tb=short -v --ignore=tests/test_frontend.py
 
   format-check:
     name: Format check
@@ -89,3 +90,23 @@ jobs:
             echo "api.js should not import htm"; exit 1
           fi
           echo "Import consistency OK."
+
+  e2e:
+    name: Frontend e2e (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        run: python -m pytest tests/test_frontend.py --tb=short -v
