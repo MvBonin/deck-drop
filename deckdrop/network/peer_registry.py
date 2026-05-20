@@ -232,7 +232,9 @@ class PeerRegistry:
             # Comment sync: fetch remote comments and merge
             await self._sync_comments(game_id, local, address, port)
 
-    async def _sync_comments(self, game_id: str, local_game: object, address: str, port: int) -> None:
+    async def _sync_comments(
+        self, game_id: str, local_game: object, address: str, port: int
+    ) -> None:
         url = _peer_http_url(address, port, f"/api/games/{game_id}/comments")
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
@@ -244,7 +246,8 @@ class PeerRegistry:
             merged = merge_comments(local_comments, remote)
             if len(merged) > len(local_comments):
                 save_comments(local_game.path, merged)
-                log.debug("Merged %d new comment(s) for game %s", len(merged) - len(local_comments), game_id)
+                added = len(merged) - len(local_comments)
+                log.debug("Merged %d new comment(s) for game %s", added, game_id)
         except Exception as exc:
             log.debug("Comment sync failed for %s: %s", game_id, exc)
 

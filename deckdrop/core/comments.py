@@ -15,7 +15,7 @@ COMMENTS_FILENAME = "comments.toml"
 
 @dataclass
 class Comment:
-    id: str       # uuid4 – used for deduplication across peers
+    id: str  # uuid4 – used for deduplication across peers
     author: str
     text: str
     created_at: str  # ISO 8601 UTC

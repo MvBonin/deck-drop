@@ -19,9 +19,13 @@ from pydantic import BaseModel
 from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
 from deckdrop.core import game as game_mod
-from deckdrop.core import integrity
-from deckdrop.core import torrent_prep
-from deckdrop.core.comments import Comment, load_comments, merge_comments, new_comment, save_comments
+from deckdrop.core import integrity, torrent_prep
+from deckdrop.core.comments import (
+    Comment,
+    load_comments,
+    new_comment,
+    save_comments,
+)
 from deckdrop.core.config import save as save_cfg
 from deckdrop.core.game import GameInfo
 
