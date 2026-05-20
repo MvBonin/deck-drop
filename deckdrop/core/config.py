@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 import uuid
 from pathlib import Path
@@ -9,7 +10,9 @@ from typing import Any
 
 import tomli_w
 
-CONFIG_PATH = Path.home() / ".config" / "deckdrop" / "config.toml"
+CONFIG_PATH: Path = Path(
+    os.getenv("DECKDROP_CONFIG") or (Path.home() / ".config" / "deckdrop" / "config.toml")
+)
 
 _DEFAULTS: dict[str, Any] = {
     "user": {
