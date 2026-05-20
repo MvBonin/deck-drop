@@ -40,6 +40,8 @@ export const api = {
   settings:     ()          => get('/api/settings'),
   saveSettings: (body)      => put('/api/settings', body),
   shutdown:     ()          => post('/api/shutdown'),
+  getComments:  (id)        => get(`/api/games/${id}/comments`),
+  postComment:  (id, text)  => post(`/api/games/${id}/comments`, { text }),
 };
 
 export function fmtBytes(n) {

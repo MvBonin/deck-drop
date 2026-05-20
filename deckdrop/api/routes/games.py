@@ -21,6 +21,7 @@ from deckdrop.api.deps import local_only
 from deckdrop.core import game as game_mod
 from deckdrop.core import integrity
 from deckdrop.core import torrent_prep
+from deckdrop.core.comments import Comment, load_comments, merge_comments, new_comment, save_comments
 from deckdrop.core.config import save as save_cfg
 from deckdrop.core.game import GameInfo
 
@@ -46,6 +47,10 @@ class GameOut(BaseModel):
     torrent_prep_progress: float | None = None
     torrent_prep_error: str | None = None
     path: str
+    description: str = ""
+    launch_exe: str = ""
+    launch_args: str = ""
+    runner: str = ""
 
     @classmethod
     def from_info(cls, g: GameInfo) -> GameOut:
@@ -79,6 +84,10 @@ class GameOut(BaseModel):
             torrent_prep_progress=prep_progress,
             torrent_prep_error=prep_error,
             path=str(g.path),
+            description=g.description,
+            launch_exe=g.launch_exe,
+            launch_args=g.steam.launch_args,
+            runner=g.steam.runner,
         )
 
 
@@ -94,6 +103,25 @@ class PatchGameRequest(BaseModel):
     name: str | None = None
     platform: str | None = None
     steam_app_id: int | None = None
+    description: str | None = None
+    launch_exe: str | None = None
+    launch_args: str | None = None
+    runner: str | None = None
+
+
+class AddCommentRequest(BaseModel):
+    text: str
+
+
+class CommentOut(BaseModel):
+    id: str
+    author: str
+    text: str
+    created_at: str
+
+    @classmethod
+    def from_comment(cls, c: Comment) -> CommentOut:
+        return cls(id=c.id, author=c.author, text=c.text, created_at=c.created_at)
 
 
 # -- Routes --
@@ -179,6 +207,18 @@ def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
     if req.steam_app_id is not None:
         g.steam.app_id = req.steam_app_id
         changed = True
+    if req.description is not None:
+        g.description = req.description
+        changed = True
+    if req.launch_exe is not None:
+        g.launch_exe = req.launch_exe
+        changed = True
+    if req.launch_args is not None:
+        g.steam.launch_args = req.launch_args
+        changed = True
+    if req.runner is not None:
+        g.steam.runner = req.runner
+        changed = True
 
     if changed:
         game_mod.bump_version(g, s.cfg.user_name)
@@ -197,6 +237,35 @@ def remove_game(game_id: str) -> None:
     s.cfg.remove_game_path(g.path)
     save_cfg(s.cfg)
     s.library.remove(game_id)
+
+
+@router.get("/games/{game_id}/comments", response_model=list[CommentOut])
+def list_comments(game_id: str) -> list[CommentOut]:
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+    comments = load_comments(g.path)
+    return [CommentOut.from_comment(c) for c in comments]
+
+
+@router.post(
+    "/games/{game_id}/comments",
+    response_model=CommentOut,
+    status_code=201,
+    dependencies=[Depends(local_only)],
+)
+def add_comment(game_id: str, req: AddCommentRequest) -> CommentOut:
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+    if not req.text.strip():
+        raise HTTPException(400, "Kommentar darf nicht leer sein")
+    comment = new_comment(author=s.cfg.user_name, text=req.text.strip())
+    existing = load_comments(g.path)
+    save_comments(g.path, existing + [comment])
+    return CommentOut.from_comment(comment)
 
 
 @router.get("/games/{game_id}/magnet")

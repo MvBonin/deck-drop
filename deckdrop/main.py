@@ -64,6 +64,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
     library = Library()
     library.reload(cfg)
     peer_registry = PeerRegistry()
+    peer_registry.set_library(library)
 
     # TransferManager is optional (requires libtorrent)
     transfer = None
