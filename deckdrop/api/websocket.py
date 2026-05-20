@@ -12,8 +12,15 @@ router = APIRouter()
 _connections: set[WebSocket] = set()
 
 
+_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
+    host = ws.client.host if ws.client else ""
+    if host not in _LOCAL_HOSTS:
+        await ws.close(code=1008)
+        return
     await ws.accept()
     _connections.add(ws)
     try:

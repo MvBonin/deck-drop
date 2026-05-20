@@ -13,10 +13,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from deckdrop.api import state as app_state
+from deckdrop.api.deps import local_only
 from deckdrop.core import game as game_mod
 from deckdrop.core import integrity
 from deckdrop.core.config import save as save_cfg
@@ -91,7 +92,7 @@ def get_game(game_id: str) -> GameOut:
     return GameOut.from_info(g)
 
 
-@router.post("/games", response_model=GameOut, status_code=201)
+@router.post("/games", response_model=GameOut, status_code=201, dependencies=[Depends(local_only)])
 def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
     s = app_state.get()
     path = Path(req.path).expanduser().resolve()
@@ -132,7 +133,7 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
     return GameOut.from_info(info)
 
 
-@router.patch("/games/{game_id}", response_model=GameOut)
+@router.patch("/games/{game_id}", response_model=GameOut, dependencies=[Depends(local_only)])
 def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
     s = app_state.get()
     g = s.library.get(game_id)
@@ -156,7 +157,7 @@ def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
     return GameOut.from_info(g)
 
 
-@router.delete("/games/{game_id}", status_code=204)
+@router.delete("/games/{game_id}", status_code=204, dependencies=[Depends(local_only)])
 def remove_game(game_id: str) -> None:
     s = app_state.get()
     g = s.library.get(game_id)
