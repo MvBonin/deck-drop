@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -135,7 +137,7 @@ def test_comment_on_missing_game(client_with_game):
 
 def test_get_peer_game_comments(tmp_path, monkeypatch):
     """Network view: local API proxies comments from a remote peer."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     from deckdrop.network.peer_registry import PeerEntry, PeerRegistry
 
@@ -176,3 +178,99 @@ def test_get_peer_game_comments(tmp_path, monkeypatch):
     assert len(data) == 1
     assert data[0]["text"] == "Läuft super auf dem Deck!"
     assert data[0]["author"] == "Bob"
+
+
+# ── Peer background sync tests (_sync_comments) ───────────────────────────────
+
+
+def _make_mock_http(status: int, json_body: object):
+    mock_resp = MagicMock()
+    mock_resp.status_code = status
+    mock_resp.json.return_value = json_body
+    mock_client = MagicMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    return mock_client
+
+
+@pytest.mark.asyncio
+async def test_sync_comments_merges_remote(tmp_path):
+    """_sync_comments() writes remote comments into local comments.toml."""
+    from unittest.mock import patch
+
+    from deckdrop.network.peer_registry import PeerRegistry
+
+    game_dir = tmp_path / "Game"
+    game_dir.mkdir()
+
+    ts = "2026-01-01T10:00:00+00:00"
+    remote = [{"id": "r1", "author": "Bob", "text": "Läuft super!", "created_at": ts}]
+    local_game = MagicMock()
+    local_game.path = game_dir
+
+    mock_client = _make_mock_http(200, remote)
+    with patch("deckdrop.network.peer_registry.httpx.AsyncClient", return_value=mock_client):
+        await PeerRegistry()._sync_comments("game-1", local_game, "192.168.1.1", 7373)
+
+    saved = load_comments(game_dir)
+    assert len(saved) == 1
+    assert saved[0].id == "r1"
+    assert saved[0].author == "Bob"
+
+
+@pytest.mark.asyncio
+async def test_sync_comments_deduplicates(tmp_path):
+    """_sync_comments() does not duplicate a comment already stored locally."""
+    from unittest.mock import patch
+
+    from deckdrop.network.peer_registry import PeerRegistry
+
+    game_dir = tmp_path / "Game"
+    game_dir.mkdir()
+
+    c1 = new_comment("Alice", "Erster")
+    save_comments(game_dir, [c1])
+
+    c2_dict = {
+        "id": "c2",
+        "author": "Bob",
+        "text": "Zweiter",
+        "created_at": "2026-06-01T10:00:00+00:00",
+    }
+    remote = [
+        {"id": c1.id, "author": c1.author, "text": c1.text, "created_at": c1.created_at},
+        c2_dict,
+    ]
+
+    local_game = MagicMock()
+    local_game.path = game_dir
+
+    mock_client = _make_mock_http(200, remote)
+    with patch("deckdrop.network.peer_registry.httpx.AsyncClient", return_value=mock_client):
+        await PeerRegistry()._sync_comments("game-1", local_game, "192.168.1.1", 7373)
+
+    saved = load_comments(game_dir)
+    assert len(saved) == 2
+    assert {c.id for c in saved} == {c1.id, "c2"}
+
+
+@pytest.mark.asyncio
+async def test_sync_comments_skips_on_http_error(tmp_path):
+    """_sync_comments() handles HTTP errors silently; local file stays empty."""
+    from unittest.mock import patch
+
+    from deckdrop.network.peer_registry import PeerRegistry
+
+    game_dir = tmp_path / "Game"
+    game_dir.mkdir()
+    local_game = MagicMock()
+    local_game.path = game_dir
+
+    with patch(
+        "deckdrop.network.peer_registry.httpx.AsyncClient",
+        side_effect=Exception("connection refused"),
+    ):
+        await PeerRegistry()._sync_comments("game-1", local_game, "192.168.1.1", 7373)
+
+    assert load_comments(game_dir) == []
