@@ -18,15 +18,21 @@ class Library:
 
     # -- loading --
 
-    def reload(self, cfg: Config) -> None:
+    def reload(
+        self,
+        cfg: Config,
+        *,
+        exclude_paths: frozenset[Path] | None = None,
+    ) -> None:
         """Scan all configured paths and refresh the in-memory library."""
         found: dict[str, GameInfo] = {}
+        excluded = exclude_paths or frozenset()
 
         # 1. Scan every subdirectory of download_dir
         download_dir = cfg.download_dir
         if download_dir.exists():
             for subdir in sorted(download_dir.iterdir()):
-                if subdir.is_dir():
+                if subdir.is_dir() and subdir.resolve() not in excluded:
                     info = game_mod.load_from_path(subdir)
                     if info:
                         info.available = True

@@ -413,6 +413,15 @@ class TransferManager:
         save_path = dest_path.parent
         save_path.mkdir(parents=True, exist_ok=True)
 
+        from deckdrop.core.game import TOML_FILENAME
+
+        stale_toml = dest_path / TOML_FILENAME
+        if stale_toml.is_file():
+            try:
+                stale_toml.unlink()
+            except OSError as exc:
+                log.warning("Could not remove stale %s before download: %s", stale_toml, exc)
+
         params = _parse_magnet_params(lt, magnet, str(save_path))
         handle = self._session.add_torrent(params)
 
@@ -623,6 +632,19 @@ class TransferManager:
         if rec:
             return self._paused_status(rec)
         return None
+
+    def incomplete_download_dest_paths(self) -> frozenset[Path]:
+        """Dest folders for downloads not yet finished — hide from Meine Spiele."""
+        paths: set[Path] = set()
+        for h in self._handles.values():
+            if h.download_id not in self._completed_ids:
+                paths.add(h.dest_path.resolve())
+        for rec in self._paused.values():
+            if rec.download_id in self._completed_ids:
+                continue
+            if not _bytes_complete(rec.downloaded_bytes, rec.total_bytes):
+                paths.add(Path(rec.dest_path).resolve())
+        return frozenset(paths)
 
     def all_statuses(self) -> list[DownloadStatus]:
         seen: set[str] = set()
@@ -993,7 +1015,10 @@ class TransferManager:
             },
         )
         if self._library:
-            self._library.reload(self._cfg)
+            self._library.reload(
+                self._cfg,
+                exclude_paths=self.incomplete_download_dest_paths(),
+            )
 
     async def _poll_loop(self) -> None:
         while True:

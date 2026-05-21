@@ -67,7 +67,6 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
     write_pid_file(cfg_mod.CONFIG_PATH)
     atexit.register(remove_pid_file, cfg_mod.CONFIG_PATH)
     library = Library()
-    library.reload(cfg)
     peer_registry = PeerRegistry()
     peer_registry.set_library(library)
 
@@ -84,6 +83,11 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
         logging.getLogger(__name__).warning("libtorrent not available – transfers disabled")
 
     app_state.init(cfg, library, peer_registry, transfer)
+
+    exclude = (
+        transfer.incomplete_download_dest_paths() if transfer is not None else frozenset()
+    )
+    library.reload(cfg, exclude_paths=exclude)
 
     # Ensure directories exist
     cfg.download_dir.mkdir(parents=True, exist_ok=True)
