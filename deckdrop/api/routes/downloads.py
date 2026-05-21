@@ -74,13 +74,17 @@ class DownloadOut(BaseModel):
     game_name: str
     peer_id: str
     peer_name: str
-    status: str  # queued | downloading | seeding | done | error | paused
+    status: str  # queued | downloading | verifying | seeding | done | error | paused
     progress: float  # 0.0–1.0
     speed_bytes_sec: int
     downloaded_bytes: int
     total_bytes: int
     num_peers: int
+    pieces_total: int = 0
+    pieces_missing: int = 0
+    bytes_remaining: int = 0
     error: str | None = None
+    error_hint: str | None = None
     dest_path: str | None = None
 
 

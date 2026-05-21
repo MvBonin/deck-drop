@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { GameCard } from './GameCard.js';
+import { Comments } from './Comments.js';
 import { useGridNav } from '../app.js';
 
 export function Network({ wsEvent, onNavigate, showToast }) {
@@ -10,6 +11,7 @@ export function Network({ wsEvent, onNavigate, showToast }) {
   const [peers, setPeers]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(null); // game_id being started
+  const [commentsGame, setCommentsGame] = useState(null);
   const [query, setQuery]     = useState('');
   const gridRef = useRef(null);
   useGridNav(gridRef);
@@ -94,8 +96,10 @@ export function Network({ wsEvent, onNavigate, showToast }) {
         : games.length === 0
           ? html`<div class="empty-state">
               <div class="empty-icon">📡</div>
-              <div class="empty-title">Keine Peers gefunden</div>
-              <div class="empty-sub">Starte DeckDrop auf anderen Geräten im gleichen WLAN.</div>
+              <div class="empty-title">${onlineCount > 0 ? 'Keine Spiele von Peers' : 'Keine Peers gefunden'}</div>
+              <div class="empty-sub">${onlineCount > 0
+                ? 'Peers sind online, teilen aber noch keine Spiele – oder die Spieleliste lädt noch (einige Sekunden warten).'
+                : 'Starte DeckDrop auf anderen Geräten im gleichen WLAN.'}</div>
             </div>`
           : filtered.length === 0
             ? html`<div class="empty-state">
@@ -111,9 +115,19 @@ export function Network({ wsEvent, onNavigate, showToast }) {
                     mode="network"
                     disabled=${starting === `${g.id}:${g.peer_id}`}
                     onAction=${() => startDownload(g)}
+                    onComments=${() => setCommentsGame(g)}
                   />
                 `)}
               </div>`
       }
+
+      ${commentsGame && html`
+        <${Comments}
+          game=${commentsGame}
+          peerId=${commentsGame.peer_id}
+          readOnly
+          onClose=${() => setCommentsGame(null)}
+        />
+      `}
     </div>`;
 }

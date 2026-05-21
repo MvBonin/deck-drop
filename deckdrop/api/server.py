@@ -11,6 +11,9 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from deckdrop.api.routes import downloads, games, peers, settings, shutdown, status
 from deckdrop.api.websocket import router as ws_router
@@ -40,6 +43,17 @@ async def _default_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
+class _FrontendNoCacheMiddleware(BaseHTTPMiddleware):
+    """Avoid stale ES modules after AppImage updates (PC kept old GameCard.js)."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        path = request.url.path
+        if path.endswith((".js", ".css", ".html")) or path in ("/", "/index.html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(lifespan: Any = None) -> FastAPI:
     app = FastAPI(
         title="DeckDrop",
@@ -48,6 +62,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
         lifespan=lifespan or _default_lifespan,
     )
 
+    app.add_middleware(_FrontendNoCacheMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # LAN-only, no auth needed

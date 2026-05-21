@@ -1,11 +1,12 @@
 import { html } from 'htm/preact';
 import { useState, useEffect } from 'preact/hooks';
 import { api, fmtBytes, fmtSpeed } from '../api.js';
-import { formatApiError, formatTransferError } from '../errors.js';
+import { formatApiError, formatTransferError, getTransferHint } from '../errors.js';
 
 const STATUS_LABEL = {
   queued:      '⏳ Wartend',
   downloading: '⬇ Lädt',
+  verifying:   '🔍 Verifiziert',
   seeding:     '↑ Seeding',
   done:        '✓ Fertig',
   error:       '⚠ Fehler',
@@ -16,18 +17,45 @@ const STATUS_COLOR = {
   done:  'var(--success)',
   error: 'var(--danger)',
   seeding: 'var(--success)',
+  verifying: 'var(--accent)',
   paused: 'var(--text-dim)',
 };
 
+const ACTIVE_DOWNLOAD_STATUSES = new Set([
+  'queued', 'downloading', 'verifying', 'paused', 'error',
+]);
+
+/** Progress 0–100 as float (not rounded). */
 function progressPct(dl) {
   if (dl.total_bytes > 0) {
-    return Math.min(100, Math.round((dl.downloaded_bytes / dl.total_bytes) * 100));
+    return Math.min(100, (dl.downloaded_bytes / dl.total_bytes) * 100);
   }
-  return Math.round((dl.progress || 0) * 100);
+  return Math.min(100, (dl.progress || 0) * 100);
+}
+
+function formatPct(pct) {
+  return `${pct.toFixed(2)} %`;
+}
+
+function endSprintDetail(dl, pct) {
+  const active = dl.status === 'downloading' || dl.status === 'verifying';
+  if (!active || pct < 95) return null;
+
+  const parts = [];
+  if (dl.pieces_missing > 0) {
+    parts.push(`${dl.pieces_missing} Piece${dl.pieces_missing !== 1 ? 's' : ''} fehlen`);
+  }
+  const remaining = dl.bytes_remaining ?? Math.max(0, dl.total_bytes - dl.downloaded_bytes);
+  if (remaining > 0) {
+    parts.push(`${fmtBytes(remaining)} fehlen`);
+  }
+  return parts.length ? parts.join(' · ') : null;
 }
 
 function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
   const pct = progressPct(dl);
+  const pctLabel = formatPct(pct);
+  const fillPct = Math.min(100, pct);
   const fillClass = dl.status === 'done' || dl.status === 'seeding' ? 'done'
                   : dl.status === 'error' ? 'error'
                   : dl.status === 'paused' ? '' : '';
@@ -36,6 +64,9 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
   const canResume = dl.status === 'paused';
   const canRetry = dl.status === 'error';
   const canRemove = true;
+  const sprint = endSprintDetail(dl, pct);
+  const errMsg = dl.error ? formatTransferError(dl.error) : null;
+  const errHint = dl.status === 'error' ? getTransferHint(dl) : null;
 
   return html`
     <div class="download-row" tabIndex=${0} data-card>
@@ -63,18 +94,34 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
         </div>
       </div>
 
-      <div class="progress-bar" role="progressbar" aria-valuenow=${pct} aria-valuemin="0" aria-valuemax="100" aria-label="${pct}%">
-        <div class="progress-fill ${fillClass}" style="width:${pct}%"></div>
+      ${dl.status === 'error' && errMsg && html`
+        <div style="margin-bottom:8px;padding:10px 12px;border-radius:8px;background:rgba(220,60,60,0.12);border:1px solid var(--danger)">
+          <div style="font-size:13px;font-weight:600;color:var(--danger)">${errMsg}</div>
+          ${errHint && html`
+            <div style="font-size:12px;color:var(--text-dim);margin-top:6px">Lösung: ${errHint}</div>
+          `}
+        </div>
+      `}
+
+      <div class="progress-bar" role="progressbar" aria-valuenow=${fillPct.toFixed(2)} aria-valuemin="0" aria-valuemax="100" aria-label="${pctLabel}">
+        <div class="progress-fill ${fillClass}" style="width:${fillPct}%"></div>
       </div>
 
       <div class="download-stats">
-        <span><span class="stat-val">${pct}%</span></span>
-        ${dl.status === 'downloading' && html`
+        <span><span class="stat-val">${pctLabel}</span></span>
+        ${(dl.status === 'downloading' || dl.status === 'verifying') && html`
           <span>↓ <span class="stat-val">${fmtSpeed(dl.speed_bytes_sec)}</span></span>
           <span><span class="stat-val">${dl.num_peers}</span> Peer${dl.num_peers !== 1 ? 's' : ''}</span>
         `}
         <span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>
-        ${dl.error && html`<span style="color:var(--danger)">${formatTransferError(dl.error)}</span>`}
+        ${sprint && html`<span style="color:var(--accent)">${sprint}</span>`}
+        ${pct >= 99.5 && dl.bytes_remaining > 0 && (dl.status === 'downloading' || dl.status === 'verifying') && html`
+          <span style="color:var(--text-dim);font-size:12px">Host-Verbindung wird erneuert…</span>
+        `}
+        ${dl.num_peers >= 1 && (dl.bytes_remaining ?? 0) > 0 && (dl.bytes_remaining ?? 0) < 1024 * 1024
+          && (dl.status === 'downloading' || dl.status === 'verifying') && html`
+          <span style="color:var(--text-dim);font-size:12px">Letzte Daten vom Host ausstehend – am Host Torrent neu erstellen, dann Download neu starten.</span>
+        `}
       </div>
     </div>`;
 }
@@ -85,7 +132,10 @@ export function Downloads({ wsEvent, showToast }) {
   const [removeTarget, setRemoveTarget] = useState(null);
 
   const load = async () => {
-    try { setDownloads(await api.downloads()); }
+    try {
+      const list = await api.downloads();
+      setDownloads(list.filter(d => ACTIVE_DOWNLOAD_STATUSES.has(d.status)));
+    }
     catch {}
     finally { setLoading(false); }
   };
@@ -95,6 +145,7 @@ export function Downloads({ wsEvent, showToast }) {
   useEffect(() => {
     if (!wsEvent) return;
     if (wsEvent.event === 'download_progress' || wsEvent.event === 'download_error') {
+      if (!ACTIVE_DOWNLOAD_STATUSES.has(wsEvent.data.status)) return;
       setDownloads(prev => {
         const exists = prev.find(d => d.id === wsEvent.data.id);
         if (exists) {
@@ -104,9 +155,15 @@ export function Downloads({ wsEvent, showToast }) {
       });
     }
     if (wsEvent.event === 'download_complete') {
+      setDownloads(prev => prev.filter(d => d.id !== wsEvent.data.id));
+    }
+    if (wsEvent.event === 'download_torrent_upgraded') {
       setDownloads(prev =>
-        prev.map(d => d.id === wsEvent.data.id ? { ...d, status: 'done', progress: 1 } : d)
+        prev.map(d => d.id === wsEvent.data.id
+          ? { ...d, status: 'downloading', error: null, error_hint: null }
+          : d)
       );
+      showToast(`Torrent aktualisiert: ${wsEvent.data.game_name} – lädt nach…`);
     }
     if (wsEvent.event === 'download_error') {
       showToast(`Download fehlgeschlagen: ${formatTransferError(wsEvent.data.error)}`);
@@ -157,8 +214,7 @@ export function Downloads({ wsEvent, showToast }) {
     }
   };
 
-  const active = downloads.filter(d => !['done', 'seeding'].includes(d.status));
-  const done   = downloads.filter(d => d.status === 'done' || d.status === 'seeding');
+  const active = downloads.filter(d => ACTIVE_DOWNLOAD_STATUSES.has(d.status));
 
   return html`
     <div class="view">
@@ -171,7 +227,7 @@ export function Downloads({ wsEvent, showToast }) {
 
       ${loading
         ? html`<div class="empty-state"><div class="spinner"></div></div>`
-        : downloads.length === 0
+        : active.length === 0
           ? html`<div class="empty-state">
               <div class="empty-icon">📥</div>
               <div class="empty-title">Keine Downloads</div>
@@ -180,17 +236,6 @@ export function Downloads({ wsEvent, showToast }) {
           : html`
             <div class="download-list">
               ${active.map(d => html`
-                <${DownloadRow}
-                  key=${d.id}
-                  dl=${d}
-                  onPause=${pause}
-                  onResume=${resume}
-                  onRetry=${retry}
-                  onRemove=${setRemoveTarget}
-                />
-              `)}
-              ${done.length > 0 && active.length > 0 && html`<hr style="border-color:var(--surface-2);margin:4px 0"/>`}
-              ${done.map(d => html`
                 <${DownloadRow}
                   key=${d.id}
                   dl=${d}

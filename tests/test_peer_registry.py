@@ -156,3 +156,9 @@ def test_games_changed_detects_new_game(registry):
     assert PeerRegistry._games_changed([], [{"id": "a"}]) is True
     assert PeerRegistry._games_changed([{"id": "a"}], [{"id": "a"}]) is False
     assert PeerRegistry._games_changed([{"id": "a"}], [{"id": "b"}]) is True
+
+
+def test_games_changed_detects_has_torrent(registry):
+    old = [{"id": "a", "has_torrent": False}]
+    new = [{"id": "a", "has_torrent": True}]
+    assert PeerRegistry._games_changed(old, new) is True

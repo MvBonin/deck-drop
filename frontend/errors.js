@@ -102,3 +102,25 @@ export function formatTransferError(raw) {
   if (raw.length > 120) return `${raw.slice(0, 117)}…`;
   return raw;
 }
+
+const TRANSFER_HINT_PATTERNS = [
+  [/hash|piece/i, 'Erneut versuchen; Host-Dateien prüfen.'],
+  [/no space|disk/i, 'Speicherplatz freigeben, dann „Erneut“.'],
+  [/0 peers|no peers/i, 'Host online lassen und erneut versuchen.'],
+  [/timed out|timeout/i, 'Host erreichbar? Kurz warten und „Erneut“.'],
+  [/connection refused/i, 'Firewall: Torrent-Port 7374 am Host prüfen.'],
+  [/no such file|filesystem/i, 'Download entfernen und neu starten.'],
+];
+
+/**
+ * Actionable hint for a transfer error (API error_hint or derived from message).
+ */
+export function getTransferHint(dl) {
+  if (dl?.error_hint) return dl.error_hint;
+  const msg = formatTransferError(dl?.error || '');
+  const lower = msg.toLowerCase();
+  for (const [re, hint] of TRANSFER_HINT_PATTERNS) {
+    if (re.test(lower)) return hint;
+  }
+  return '„Erneut“ versuchen oder Host-Verbindung prüfen.';
+}

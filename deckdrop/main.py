@@ -111,6 +111,21 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
         if transfer:
             transfer.start_polling()
             transfer.seed_all_shared(library, cfg)
+            restored = transfer.restore_active_downloads()
+            if restored:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "Unterbrochene Downloads fortgesetzt: %d", restored
+                )
+
+        migrated = torrent_prep.migrate_stale_caches(library, cfg, transfer)
+        if migrated:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "Veraltete Torrent-Caches migriert: %d Spiel(e)", migrated
+            )
 
         restored = torrent_prep.restore_all_cached(library, cfg, transfer)
         if restored:

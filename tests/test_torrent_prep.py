@@ -1,6 +1,6 @@
 """Background torrent preparation."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,6 +59,61 @@ def test_list_games_shows_preparing_state(client, tmp_path):
     game = next(g for g in listed if g["id"] == game_id)
     assert game["torrent_preparing"] is True
     assert game["torrent_prep_progress"] == 0.42
+
+
+def test_add_game_schedules_torrent_prep_before_integrity_hash(client, tmp_path, monkeypatch):
+    """Torrent prep must start immediately, not after slow blake2b hashing."""
+    order: list[str] = []
+
+    def fake_schedule(game_id: str, *, force: bool = False) -> None:
+        order.append("prep")
+
+    def slow_hash(game_id: str) -> None:
+        order.append("integrity")
+
+    monkeypatch.setattr(torrent_prep, "schedule_prepare", fake_schedule)
+    monkeypatch.setattr(
+        "deckdrop.api.routes.games._hash_game_files",
+        slow_hash,
+    )
+
+    game_dir = tmp_path / "Slow"
+    game_dir.mkdir()
+    (game_dir / "big.bin").write_bytes(b"x" * 50)
+    client.post("/api/games", json={"path": str(game_dir), "name": "Slow"})
+
+    assert order == ["prep", "integrity"]
+
+
+def test_schedule_prepare_rebuilds_when_cache_unreadable(tmp_path, monkeypatch):
+    """Orphan .torrent cache without magnet must not block preparation forever."""
+    from deckdrop.core import game as game_mod
+
+    monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
+    cfg = cfg_mod.load()
+    cfg._data["paths"]["torrent_cache"] = str(tmp_path / "torrents")
+    cfg_mod.save(cfg)
+    cfg.torrent_cache.mkdir(parents=True, exist_ok=True)
+
+    game_dir = tmp_path / "BrokenCache"
+    game_dir.mkdir()
+    info = game_mod.create_new(game_dir, name="Broken", added_by="test")
+    game_mod.save(info)
+
+    library = Library()
+    library.add(info)
+    app_state.init(cfg, library)
+
+    (cfg.torrent_cache / f"{info.id}.torrent").write_bytes(b"not-a-torrent")
+
+    started: list[str] = []
+    mock_thread = MagicMock()
+    mock_thread.start = lambda: started.append(info.id)
+
+    with patch("deckdrop.core.torrent_prep.threading.Thread", return_value=mock_thread):
+        torrent_prep.schedule_prepare(info.id)
+
+    assert started == [info.id]
 
 
 def test_list_games_preparing_without_active_thread(client, tmp_path):

@@ -8,6 +8,18 @@ from pathlib import Path
 
 CHUNK_SIZE = 1024 * 1024  # 1 MB
 
+# Not part of the BitTorrent payload (local metadata; may change after torrent creation).
+TORRENT_SKIP_FILENAMES = frozenset({"deckdrop.toml", "comments.toml"})
+
+
+def should_include_in_torrent(path: Path) -> bool:
+    return path.is_file() and path.name not in TORRENT_SKIP_FILENAMES
+
+
+def iter_torrent_files(root: Path) -> list[Path]:
+    """Sorted game files to include in .torrent generation."""
+    return sorted(p for p in root.rglob("*") if should_include_in_torrent(p))
+
 
 def dir_size(root: Path) -> int:
     """Total bytes of all files under root (fast; no hashing)."""

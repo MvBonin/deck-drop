@@ -131,3 +131,48 @@ def test_comment_on_missing_game(client_with_game):
     client, _ = client_with_game
     r = client.get("/api/games/deadbeef/comments")
     assert r.status_code == 404
+
+
+def test_get_peer_game_comments(tmp_path, monkeypatch):
+    """Network view: local API proxies comments from a remote peer."""
+    from unittest.mock import MagicMock, patch
+
+    from deckdrop.network.peer_registry import PeerEntry, PeerRegistry
+
+    monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config_a.toml")
+    cfg = cfg_mod.load()
+    cfg_mod.save(cfg)
+
+    game_id = "game-abc"
+    peer_id = "peer-host"
+    remote_comments = [
+        {
+            "id": "c1",
+            "author": "Bob",
+            "text": "Läuft super auf dem Deck!",
+            "created_at": "2026-05-21T12:00:00+00:00",
+        }
+    ]
+
+    registry = PeerRegistry()
+    registry._peers[peer_id] = PeerEntry(
+        peer_id=peer_id,
+        name="Bob",
+        address="192.168.1.20",
+        port=7373,
+        games=[{"id": game_id, "name": "Portal 2"}],
+    )
+    app_state.init(cfg, Library(), registry)
+    client = TestClient(create_app())
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = remote_comments
+    with patch("deckdrop.api.routes.peers.httpx.get", return_value=mock_resp):
+        r = client.get(f"/api/peers/{peer_id}/games/{game_id}/comments")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    assert data[0]["text"] == "Läuft super auf dem Deck!"
+    assert data[0]["author"] == "Bob"

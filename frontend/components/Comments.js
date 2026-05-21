@@ -10,7 +10,7 @@ function fmtDate(iso) {
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function Comments({ game, onClose }) {
+export function Comments({ game, onClose, readOnly = false, peerId = null }) {
   const [comments, setComments] = useState([]);
   const [text, setText]         = useState('');
   const [loading, setLoading]   = useState(true);
@@ -26,11 +26,15 @@ export function Comments({ game, onClose }) {
   }, [onClose]);
 
   useEffect(() => {
-    api.getComments(game.id)
+    setLoading(true);
+    const load = peerId
+      ? api.getPeerComments(peerId, game.id)
+      : api.getComments(game.id);
+    load
       .then(setComments)
       .catch(() => setComments([]))
       .finally(() => setLoading(false));
-  }, [game.id]);
+  }, [game.id, peerId]);
 
   // Scroll to bottom when comments load
   useEffect(() => {
@@ -59,7 +63,12 @@ export function Comments({ game, onClose }) {
   return html`
     <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="Kommentare">
       <div class="dialog" style="max-width:520px;width:100%">
-        <div class="dialog-title">Kommentare · ${game.name}</div>
+        <div class="dialog-title">
+          Kommentare · ${game.name}
+          ${readOnly && game.peer_name && html`
+            <span style="font-weight:400;font-size:13px;color:var(--muted)"> · von ${game.peer_name}</span>
+          `}
+        </div>
 
         <div
           ref=${listRef}
@@ -68,7 +77,9 @@ export function Comments({ game, onClose }) {
           ${loading
             ? html`<div style="text-align:center;padding:24px"><span class="spinner"></span></div>`
             : comments.length === 0
-              ? html`<p style="color:var(--muted);font-size:13px;text-align:center;padding:24px 0">Noch keine Kommentare. Sei der Erste!</p>`
+              ? html`<p style="color:var(--muted);font-size:13px;text-align:center;padding:24px 0">${
+                  readOnly ? 'Noch keine Kommentare.' : 'Noch keine Kommentare. Sei der Erste!'
+                }</p>`
               : comments.map(c => html`
                   <div key=${c.id} style="background:var(--surface2,#1a1a2e);border-radius:8px;padding:10px 12px">
                     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
@@ -81,25 +92,30 @@ export function Comments({ game, onClose }) {
           }
         </div>
 
-        <form onSubmit=${submit} style="display:flex;flex-direction:column;gap:10px">
-          <textarea
-            ref=${textRef}
-            class="form-input"
-            rows="3"
-            placeholder="Kommentar schreiben…"
-            value=${text}
-            onInput=${e => setText(e.target.value)}
-            disabled=${posting}
-            style="resize:vertical"
-          />
-          ${error && html`<p style="color:var(--danger);font-size:13px;margin:0">${error}</p>`}
-          <div class="dialog-actions">
-            <button type="button" class="btn btn-ghost" onClick=${onClose}>Schließen</button>
-            <button type="submit" class="btn btn-primary" disabled=${!text.trim() || posting}>
-              ${posting ? html`<span class="spinner"></span>` : 'Senden'}
-            </button>
-          </div>
-        </form>
+        ${readOnly
+          ? html`<div class="dialog-actions">
+              <button type="button" class="btn btn-ghost" onClick=${onClose}>Schließen</button>
+            </div>`
+          : html`<form onSubmit=${submit} style="display:flex;flex-direction:column;gap:10px">
+              <textarea
+                ref=${textRef}
+                class="form-input"
+                rows="3"
+                placeholder="Kommentar schreiben…"
+                value=${text}
+                onInput=${e => setText(e.target.value)}
+                disabled=${posting}
+                style="resize:vertical"
+              />
+              ${error && html`<p style="color:var(--danger);font-size:13px;margin:0">${error}</p>`}
+              <div class="dialog-actions">
+                <button type="button" class="btn btn-ghost" onClick=${onClose}>Schließen</button>
+                <button type="submit" class="btn btn-primary" disabled=${!text.trim() || posting}>
+                  ${posting ? html`<span class="spinner"></span>` : 'Senden'}
+                </button>
+              </div>
+            </form>`
+        }
       </div>
     </div>`;
 }

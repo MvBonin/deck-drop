@@ -115,16 +115,23 @@ class PeerRegistry:
 
     def upsert_sync(self, peer_id: str, name: str, address: str, port: int) -> None:
         """Add or refresh a peer. Schedules async game-list fetch."""
+        old_address: str | None = None
+        is_new_peer = peer_id not in self._peers
         if peer_id in self._peers:
             entry = self._peers[peer_id]
+            old_address = entry.address
             entry.last_seen = time.monotonic()
             entry.online = True
+            entry.name = name
             entry.address = address
             entry.port = port
         else:
             self._peers[peer_id] = PeerEntry(peer_id=peer_id, name=name, address=address, port=port)
 
-        self._schedule(self._fetch_games(peer_id, address, port, is_new_peer=True))
+        if old_address and old_address != address:
+            self._schedule(self._sync_peer_address(peer_id, address))
+
+        self._schedule(self._fetch_games(peer_id, address, port, is_new_peer=is_new_peer))
 
     def remove(self, peer_id: str) -> None:
         entry = self._peers.get(peer_id)
@@ -143,9 +150,30 @@ class PeerRegistry:
     def _games_changed(old: list[dict], new: list[dict]) -> bool:
         if len(old) != len(new):
             return True
-        old_ids = {g.get("id") for g in old}
-        new_ids = {g.get("id") for g in new}
-        return old_ids != new_ids
+        old_by_id = {g.get("id"): g for g in old if g.get("id")}
+        new_by_id = {g.get("id"): g for g in new if g.get("id")}
+        if set(old_by_id) != set(new_by_id):
+            return True
+        for gid, ng in new_by_id.items():
+            og = old_by_id.get(gid)
+            if not og:
+                return True
+            for key in ("has_torrent", "torrent_preparing", "torrent_prep_error", "info_hash"):
+                if og.get(key) != ng.get(key):
+                    return True
+        return False
+
+    def trigger_refresh(self) -> None:
+        """Ask all online peers for fresh game lists (e.g. after local torrent rebuild)."""
+        self._schedule(self.refresh_all_online())
+
+    async def _sync_peer_address(self, peer_id: str, address: str) -> None:
+        from deckdrop.api import state as app_state
+
+        transfer = app_state.get().transfer
+        if transfer is not None and hasattr(transfer, "update_peer_address"):
+            transfer.update_peer_address(peer_id, address)
+            log.info("Peer %s address updated to %s for active downloads", peer_id[:8], address)
 
     async def _fetch_games(
         self,
@@ -164,6 +192,17 @@ class PeerRegistry:
         except Exception as exc:
             log.warning("Could not fetch games from %s:%s – %s", address, port, exc)
             games = []
+            # First contact often races mDNS/API – retry once quickly
+            if is_new_peer:
+                await asyncio.sleep(0.5)
+                try:
+                    async with httpx.AsyncClient(timeout=GAME_FETCH_TIMEOUT) as client:
+                        r = await client.get(url)
+                        r.raise_for_status()
+                        games = r.json()
+                except Exception as retry_exc:
+                    log.warning("Game fetch retry failed for %s:%s – %s", address, port, retry_exc)
+                    games = []
 
         entry = self._peers.get(peer_id)
         if not entry:

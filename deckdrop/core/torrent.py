@@ -7,8 +7,13 @@ RuntimeError with a clear message if it's not installed.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+from deckdrop.core.integrity import iter_torrent_files
 
 _LT_MISSING = "libtorrent is not installed. Install it with: pip install libtorrent"
 
@@ -23,13 +28,18 @@ def _lt():
 
 
 # LAN-only session settings – hardcoded, not user-configurable
-_LAN_SETTINGS = {
+_LAN_SETTINGS_CORE = {
     "enable_dht": False,
     "enable_lsd": True,  # Local Service Discovery via LAN multicast
     "enable_upnp": False,
     "enable_natpmp": False,
     "announce_to_all_trackers": False,
     "announce_to_all_tiers": False,
+}
+# Optional tuning; names differ across libtorrent builds (e.g. AppImage vs pip).
+_LAN_SETTINGS_OPTIONAL = {
+    "allow_multiple_connections_per_ip": True,
+    "unchoke_slots_limit": 16,
 }
 
 
@@ -42,8 +52,15 @@ def create_torrent_data(
     if on_progress:
         on_progress(0.02)
 
+    files = iter_torrent_files(game_path)
+    if not files:
+        raise RuntimeError(f"No shareable files in {game_path}")
+
+    parent = game_path.parent
     fs = lt.file_storage()
-    lt.add_files(fs, str(game_path))
+    for file_path in files:
+        rel = file_path.relative_to(parent).as_posix()
+        fs.add_file(rel, file_path.stat().st_size)
     t = lt.create_torrent(fs)
     t.set_comment(f"DeckDrop – {game_path.name}")
 
@@ -56,9 +73,9 @@ def create_torrent_data(
             on_progress(0.05 + 0.9 * frac)
 
     try:
-        lt.set_piece_hashes(t, str(game_path.parent), _piece_progress)  # type: ignore[misc]
+        lt.set_piece_hashes(t, str(parent), _piece_progress)  # type: ignore[misc]
     except TypeError:
-        lt.set_piece_hashes(t, str(game_path.parent))  # type: ignore[misc]
+        lt.set_piece_hashes(t, str(parent))  # type: ignore[misc]
         if on_progress:
             on_progress(0.5)
 
@@ -82,6 +99,16 @@ def make_magnet(torrent_data: bytes) -> tuple[str, str]:
 def lan_session(torrent_port: int) -> object:
     """Return a new libtorrent session configured for LAN-only operation."""
     lt = _lt()
-    settings = dict(_LAN_SETTINGS)
-    settings["listen_interfaces"] = f"0.0.0.0:{torrent_port}"
-    return lt.session(settings)
+    listen = f"0.0.0.0:{torrent_port}"
+    settings = dict(_LAN_SETTINGS_CORE)
+    settings.update(_LAN_SETTINGS_OPTIONAL)
+    settings["listen_interfaces"] = listen
+    try:
+        return lt.session(settings)
+    except (KeyError, TypeError) as exc:
+        if "unknown name" not in str(exc).lower():
+            raise
+        log.warning("Some libtorrent session settings unsupported (%s), using core set", exc)
+        core = dict(_LAN_SETTINGS_CORE)
+        core["listen_interfaces"] = listen
+        return lt.session(core)

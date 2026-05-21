@@ -46,6 +46,7 @@ class GameOut(BaseModel):
     updated_at: str
     steam_app_id: int | None
     has_torrent: bool
+    info_hash: str | None = None
     source_peer_name: str | None = None
     torrent_preparing: bool = False
     torrent_prep_progress: float | None = None
@@ -83,6 +84,7 @@ class GameOut(BaseModel):
             updated_at=g.updated_at,
             steam_app_id=g.steam.app_id,
             has_torrent=has_torrent,
+            info_hash=g.torrent.info_hash or None,
             source_peer_name=g.origin.peer_name or None,
             torrent_preparing=preparing,
             torrent_prep_progress=prep_progress,
@@ -187,9 +189,10 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
 
     s.library.add(info)
 
-    # Hash files and build torrent in the background (avoid blocking HTTP / OOM on large games)
-    background_tasks.add_task(_hash_game_files, info)
-    background_tasks.add_task(torrent_prep.schedule_prepare, info.id)
+    # Start torrent/magnet prep immediately (must not wait behind integrity hashing).
+    torrent_prep.schedule_prepare(info.id)
+    # Blake2b file hashes for deckdrop.toml — slow on large games, runs in parallel.
+    background_tasks.add_task(_hash_game_files, info.id)
 
     return GameOut.from_info(info)
 
@@ -301,15 +304,22 @@ def get_magnet(game_id: str) -> dict[str, str]:
 # -- Background task --
 
 
-def _hash_game_files(info: GameInfo) -> None:
-    """Hash all game files and update deckdrop.toml."""
-    try:
-        hashes, total = integrity.hash_directory(info.path)
-        info.files = hashes
-        info.size_bytes = total
-        game_mod.save(info)
-    except Exception as exc:
-        # Non-fatal: hashing can be slow, errors are logged but don't crash
-        import logging
+def _hash_game_files(game_id: str) -> None:
+    """Hash all game files and update deckdrop.toml (runs after torrent prep is scheduled)."""
+    import logging
 
-        logging.getLogger(__name__).error("Hashing failed for %s: %s", info.path, exc)
+    log = logging.getLogger(__name__)
+    try:
+        s = app_state.get()
+        g = s.library.get(game_id)
+        if not g:
+            return
+        old_files = dict(g.files)
+        hashes, total = integrity.hash_directory(g.path)
+        if hashes != old_files:
+            torrent_prep.invalidate_torrent(game_id)
+        g.files = hashes
+        g.size_bytes = total
+        game_mod.save(g)
+    except Exception as exc:
+        log.error("Hashing failed for game %s: %s", game_id, exc)

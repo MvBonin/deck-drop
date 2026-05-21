@@ -97,12 +97,12 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
         ${prepFailed && html`
           <span class="unavailable-chip" style="margin-bottom:6px">Vorbereitung fehlgeschlagen</span>
         `}
-        ${unavailable
-          ? html`<span class="unavailable-chip">Nicht verfügbar</span>`
-          : html`<div style="display:flex;gap:6px;align-items:center">
-              <button
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          ${unavailable
+            ? html`<span class="unavailable-chip">Nicht verfügbar</span>`
+            : html`<button
                 class=${'btn ' + (mode === 'own' ? 'btn-secondary' : 'btn-primary')}
-                style=${mode === 'own' && (onEdit || onComments) ? 'flex:1' : ''}
+                style=${(mode === 'own' || mode === 'network') && (onEdit || onComments) ? 'flex:1' : ''}
                 onClick=${onAction}
                 disabled=${disabled || ownPreparing || hostPreparing}
                 tabIndex=${-1}
@@ -114,29 +114,29 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
                     : mode === 'own'
                       ? '✓ Geteilt'
                       : '↓ Laden'}
-              </button>
-              ${mode === 'own' && onComments && html`
-                <button
-                  class="btn btn-ghost"
-                  style="padding:6px 10px;font-size:15px"
-                  onClick=${onComments}
-                  tabIndex=${-1}
-                  title="Kommentare"
-                  aria-label="Kommentare anzeigen"
-                >💬</button>
-              `}
-              ${mode === 'own' && onEdit && html`
-                <button
-                  class="btn btn-ghost"
-                  style="padding:6px 10px;font-size:15px"
-                  onClick=${onEdit}
-                  tabIndex=${-1}
-                  title="Bearbeiten"
-                  aria-label="Spiel bearbeiten"
-                >✎</button>
-              `}
-            </div>`
-        }
+              </button>`
+          }
+          ${(mode === 'own' || mode === 'network') && onComments && html`
+            <button
+              class="btn btn-ghost"
+              style="padding:6px 10px;font-size:15px;min-width:36px"
+              onClick=${e => { e.stopPropagation(); onComments(); }}
+              tabIndex=${-1}
+              title="Kommentare"
+              aria-label="Kommentare anzeigen"
+            >💬</button>
+          `}
+          ${mode === 'own' && onEdit && html`
+            <button
+              class="btn btn-ghost"
+              style="padding:6px 10px;font-size:15px;min-width:36px"
+              onClick=${onEdit}
+              tabIndex=${-1}
+              title="Bearbeiten"
+              aria-label="Spiel bearbeiten"
+            >✎</button>
+          `}
+        </div>
       </div>
     </div>`;
 }

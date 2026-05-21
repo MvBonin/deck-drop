@@ -54,6 +54,29 @@ def has_cached_torrent(cfg: object, game_id: str) -> bool:
     return _cache_path(cfg, game_id).is_file()
 
 
+def torrent_cache_has_metadata(cache_path: object) -> bool:
+    """True if cached .torrent still lists deckdrop.toml or comments.toml."""
+    from deckdrop.core.integrity import TORRENT_SKIP_FILENAMES
+
+    try:
+        data = cache_path.read_bytes()  # type: ignore[union-attr]
+    except OSError:
+        return False
+    return any(name.encode() in data for name in TORRENT_SKIP_FILENAMES)
+
+
+def migrate_stale_caches(library: object, cfg: object, transfer: object | None) -> int:
+    """Invalidate cached torrents that include local metadata files (pre-filter era)."""
+    migrated = 0
+    for g in library.all():  # type: ignore[union-attr]
+        cache = _cache_path(cfg, g.id)
+        if cache.is_file() and torrent_cache_has_metadata(cache):
+            log.info("Migrating stale torrent cache for %s (%s)", g.name, g.id)
+            invalidate_torrent(g.id)
+            migrated += 1
+    return migrated
+
+
 def restore_from_cache(game_id: str) -> bool:
     """
     Load magnet/info_hash from an existing .torrent cache into deckdrop.toml.
@@ -98,7 +121,39 @@ def restore_all_cached(library: object, cfg: object, transfer: object | None) ->
     return restored
 
 
-def schedule_prepare(game_id: str) -> None:
+def invalidate_torrent(game_id: str) -> None:
+    """
+    Drop cached .torrent and magnet so the next prepare rebuilds from disk.
+    Use after metadata or game file changes invalidated the old torrent.
+    """
+    from deckdrop.api import state as app_state
+    from deckdrop.core import game as game_mod
+
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        return
+
+    cache = _cache_path(s.cfg, game_id)
+    try:
+        if cache.is_file():
+            cache.unlink()
+    except OSError as exc:
+        log.warning("Could not delete torrent cache for %s: %s", game_id, exc)
+
+    if g.torrent.magnet or g.torrent.info_hash:
+        g.torrent.magnet = ""
+        g.torrent.info_hash = ""
+        game_mod.save(g)
+
+    if s.transfer is not None:
+        s.transfer.drop_seed(game_id)
+
+    log.info("Torrent invalidated for %s – re-preparing", g.name)
+    schedule_prepare(game_id, force=True)
+
+
+def schedule_prepare(game_id: str, *, force: bool = False) -> None:
     """Start torrent/magnet preparation in a background thread if needed."""
     from deckdrop.api import state as app_state
 
@@ -107,13 +162,19 @@ def schedule_prepare(game_id: str) -> None:
     if not g:
         return
 
-    if restore_from_cache(game_id):
-        return
-    if g.torrent.magnet:
-        return
-    if has_cached_torrent(s.cfg, game_id):
-        # Cache present but restore failed – do not re-hash blindly
-        return
+    if not force:
+        if restore_from_cache(game_id):
+            return
+        if g.torrent.magnet:
+            return
+        if has_cached_torrent(s.cfg, game_id):
+            # Stale or corrupt cache — remove and rebuild
+            cache = _cache_path(s.cfg, game_id)
+            try:
+                cache.unlink()
+                log.info("Removed unusable torrent cache for %s (%s)", g.name, game_id)
+            except OSError as exc:
+                log.warning("Could not delete torrent cache for %s: %s", game_id, exc)
 
     with _lock:
         if game_id in _preparing:
@@ -125,7 +186,7 @@ def schedule_prepare(game_id: str) -> None:
     _emit("torrent_prep_started", {"game_id": game_id, "progress": 0.0})
     threading.Thread(
         target=_prepare,
-        args=(game_id,),
+        args=(game_id, force),
         daemon=True,
         name=f"torrent-prep-{game_id}",
     ).start()
@@ -156,7 +217,7 @@ def _emit(event: str, data: dict[str, Any]) -> None:
         log.debug("Could not emit %s: %s", event, exc)
 
 
-def _prepare(game_id: str) -> None:
+def _prepare(game_id: str, force: bool = False) -> None:
     from deckdrop.api import state as app_state
     from deckdrop.core import game as game_mod
     from deckdrop.core.torrent import create_torrent_data, make_magnet
@@ -166,7 +227,7 @@ def _prepare(game_id: str) -> None:
         g = s.library.get(game_id)
         if not g:
             return
-        if restore_from_cache(game_id) or g.torrent.magnet:
+        if not force and (restore_from_cache(game_id) or g.torrent.magnet):
             with _lock:
                 _progress[game_id] = 1.0
             _emit(
@@ -190,14 +251,23 @@ def _prepare(game_id: str) -> None:
 
         if s.transfer is not None:
             s.transfer.seed_from_cache(g.id, g.path, cache_path)
+            if hasattr(s.transfer, "recheck_seed"):
+                s.transfer.recheck_seed(g.id)
 
         with _lock:
             _progress[game_id] = 1.0
         _emit(
             "torrent_prep_complete",
-            {"game_id": game_id, "progress": 1.0, "has_torrent": True},
+            {
+                "game_id": game_id,
+                "progress": 1.0,
+                "has_torrent": True,
+                "info_hash": g.torrent.info_hash,
+            },
         )
         log.info("Torrent ready for %s (%s)", g.name, game_id)
+        if s.peer_registry is not None and hasattr(s.peer_registry, "trigger_refresh"):
+            s.peer_registry.trigger_refresh()
     except Exception as exc:
         msg = str(exc)
         with _lock:
