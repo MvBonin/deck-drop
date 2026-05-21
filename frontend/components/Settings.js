@@ -147,6 +147,12 @@ export function Settings({ showToast }) {
         </div>
       </div>
 
+      <p style="font-size:12px;color:var(--text-dim);padding:4px 20px 12px;line-height:1.6;margin:0">
+        🔒 DeckDrop kommuniziert nur im lokalen Netzwerk. DHT und externe Tracker sind
+        deaktiviert – Ports ${cfg.port} und ${cfg.torrent_port} werden ausschließlich für
+        LAN-Peers (inkl. Tailscale) verwendet.
+      </p>
+
       <p class="settings-section-title">Anwendung</p>
       <div class="settings-section">
         <button
