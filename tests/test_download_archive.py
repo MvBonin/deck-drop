@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from deckdrop.network.transfer import (
-    TransferManager,
     _ACTIVE_DOWNLOAD_STATUSES,
+    TransferManager,
     _Handle,
     _PersistedRecord,
 )
