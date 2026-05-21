@@ -62,11 +62,15 @@ class GameOut(BaseModel):
         cfg = app_state.get().cfg
         prep_error = torrent_prep.get_prep_error(g.id)
         has_torrent = bool(g.torrent.magnet)
-        # Only show prep while actively hashing or truly missing (not when cache exists)
-        preparing = torrent_prep.is_preparing(g.id) or (
-            not has_torrent
-            and prep_error is None
-            and not torrent_prep.has_cached_torrent(cfg, g.id)
+        # Peer downloads do not need local torrent prep (only locally shared games do).
+        local_share = not (g.origin.peer_id or g.origin.peer_name)
+        preparing = local_share and (
+            torrent_prep.is_preparing(g.id)
+            or (
+                not has_torrent
+                and prep_error is None
+                and not torrent_prep.has_cached_torrent(cfg, g.id)
+            )
         )
         prep_progress: float | None = None
         if preparing:

@@ -137,6 +137,8 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
             logging.getLogger(__name__).info("Torrent cache restored for %d game(s)", restored)
         for g in library.all():
+            if g.origin.peer_id or g.origin.peer_name:
+                continue
             if not g.torrent.magnet and not torrent_prep.has_cached_torrent(cfg, g.id):
                 torrent_prep.schedule_prepare(g.id)
         yield

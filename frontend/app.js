@@ -44,6 +44,17 @@ function App() {
   const [toast, setToast]         = useState('');
   const toastTimer = useRef(null);
 
+  const ACTIVE_DL = new Set(['queued', 'downloading', 'verifying', 'paused', 'error']);
+
+  const mergeDownload = useCallback((dl) => {
+    if (!dl?.id || !ACTIVE_DL.has(dl.status)) return;
+    setDownloads(prev => {
+      const exists = prev.find(d => d.id === dl.id);
+      if (exists) return prev.map(d => d.id === dl.id ? { ...d, ...dl } : d);
+      return [...prev, dl];
+    });
+  }, []);
+
   // -- Initial status fetch --
   useEffect(() => {
     api.status().then(setStatus).catch(() => setStatus({ onboarding_complete: false, name: '' }));
@@ -58,15 +69,8 @@ function App() {
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         setWsEvent(msg);
-        // Track active downloads count via WS for badge
         if (msg.event === 'download_progress') {
-          const st = msg.data.status;
-          if (st === 'done' || st === 'seeding') return;
-          setDownloads(prev => {
-            const exists = prev.find(d => d.id === msg.data.id);
-            if (exists) return prev.map(d => d.id === msg.data.id ? { ...d, ...msg.data } : d);
-            return [...prev, msg.data];
-          });
+          mergeDownload(msg.data);
         }
         if (msg.event === 'download_complete') {
           setDownloads(prev => prev.filter(d => d.id !== msg.data.id));
@@ -76,7 +80,7 @@ function App() {
     }
     connect();
     return () => { ws?.close(); clearTimeout(retryTimer); };
-  }, []);
+  }, [mergeDownload]);
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -102,8 +106,8 @@ function App() {
 
   const views = {
     games:     html`<${MyGames}    wsEvent=${wsEvent} showToast=${showToast} />`,
-    network:   html`<${Network}    wsEvent=${wsEvent} showToast=${showToast} onNavigate=${setView} />`,
-    downloads: html`<${Downloads}  wsEvent=${wsEvent} showToast=${showToast} />`,
+    network:   html`<${Network}    wsEvent=${wsEvent} showToast=${showToast} onNavigate=${setView} onDownloadStarted=${mergeDownload} />`,
+    downloads: html`<${Downloads}  wsEvent=${wsEvent} showToast=${showToast} downloads=${downloads} setDownloads=${setDownloads} />`,
     settings:  html`<${Settings}   showToast=${showToast} />`,
   };
 

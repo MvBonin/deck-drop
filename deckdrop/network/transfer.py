@@ -267,6 +267,7 @@ class TransferManager:
         self._last_reannounce_at: dict[str, float] = {}
         self._recheck_done: set[str] = set()
         self._last_magnet_check_at: dict[str, float] = {}
+        self._pending_download_dests: set[Path] = set()
         if cfg.max_upload_speed or cfg.max_download_speed:
             self.apply_rate_limits()
         self._load_state()
@@ -428,6 +429,7 @@ class TransferManager:
         # Directly connect to the peer who has the game – no waiting for LSD
         handle.connect_peer((peer_address, self._cfg.torrent_port))
 
+        self._pending_download_dests.discard(dest_path.resolve())
         self._handles[download_id] = _Handle(
             download_id=download_id,
             game_id=game_id,
@@ -633,9 +635,16 @@ class TransferManager:
             return self._paused_status(rec)
         return None
 
+    def reserve_download_dest(self, dest_path: Path) -> None:
+        """Mark destination while magnet is fetched — keep out of Meine Spiele."""
+        self._pending_download_dests.add(dest_path.resolve())
+
+    def release_download_dest(self, dest_path: Path) -> None:
+        self._pending_download_dests.discard(dest_path.resolve())
+
     def incomplete_download_dest_paths(self) -> frozenset[Path]:
         """Dest folders for downloads not yet finished — hide from Meine Spiele."""
-        paths: set[Path] = set()
+        paths: set[Path] = set(self._pending_download_dests)
         for h in self._handles.values():
             if h.download_id not in self._completed_ids:
                 paths.add(h.dest_path.resolve())

@@ -126,8 +126,7 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
     </div>`;
 }
 
-export function Downloads({ wsEvent, showToast }) {
-  const [downloads, setDownloads] = useState([]);
+export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
   const [loading, setLoading]     = useState(true);
   const [removeTarget, setRemoveTarget] = useState(null);
 
@@ -144,16 +143,6 @@ export function Downloads({ wsEvent, showToast }) {
 
   useEffect(() => {
     if (!wsEvent) return;
-    if (wsEvent.event === 'download_progress' || wsEvent.event === 'download_error') {
-      if (!ACTIVE_DOWNLOAD_STATUSES.has(wsEvent.data.status)) return;
-      setDownloads(prev => {
-        const exists = prev.find(d => d.id === wsEvent.data.id);
-        if (exists) {
-          return prev.map(d => d.id === wsEvent.data.id ? { ...d, ...wsEvent.data } : d);
-        }
-        return [...prev, wsEvent.data];
-      });
-    }
     if (wsEvent.event === 'download_complete') {
       setDownloads(prev => prev.filter(d => d.id !== wsEvent.data.id));
     }

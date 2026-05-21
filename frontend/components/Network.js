@@ -6,7 +6,7 @@ import { GameCard } from './GameCard.js';
 import { Comments } from './Comments.js';
 import { useGridNav } from '../app.js';
 
-export function Network({ wsEvent, onNavigate, showToast }) {
+export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   const [games, setGames]     = useState([]);
   const [peers, setPeers]     = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +48,8 @@ export function Network({ wsEvent, onNavigate, showToast }) {
     setStarting(`${game.id}:${game.peer_id}`);
     onNavigate('downloads');
     try {
-      await api.startDl({ peer_id: game.peer_id, game_id: game.id });
+      const dl = await api.startDl({ peer_id: game.peer_id, game_id: game.id });
+      onDownloadStarted?.(dl);
       showToast(`Download gestartet: ${game.name}`);
     } catch (err) {
       showToast(`Fehler: ${formatApiError(err, 'download')}`);

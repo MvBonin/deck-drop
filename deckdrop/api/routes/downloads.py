@@ -12,6 +12,8 @@ from pydantic import BaseModel
 
 from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
+from deckdrop.api.websocket import broadcast
+from deckdrop.core import game as game_mod
 
 router = APIRouter(tags=["downloads"], dependencies=[Depends(local_only)])
 
@@ -107,7 +109,7 @@ def _status_or_404(transfer: object, download_id: str) -> DownloadOut:
 
 
 @router.post("/download", response_model=DownloadOut, status_code=202)
-def start_download(req: StartDownloadRequest) -> DownloadOut:
+async def start_download(req: StartDownloadRequest) -> DownloadOut:
     s = _get_transfer_or_503()
 
     peer = s.peer_registry.get(req.peer_id)
@@ -118,33 +120,48 @@ def start_download(req: StartDownloadRequest) -> DownloadOut:
     if not game:
         raise HTTPException(404, f"Spiel {req.game_id} beim Peer {req.peer_id} nicht gefunden")
 
+    dest_path = (s.cfg.download_dir / game.get("name", req.game_id)).resolve()
+    s.transfer.reserve_download_dest(dest_path)
+
+    stale_toml = dest_path / game_mod.TOML_FILENAME
+    if stale_toml.is_file():
+        try:
+            stale_toml.unlink()
+        except OSError:
+            pass
+
     try:
-        magnet = _fetch_magnet_from_peer(peer.address, peer.port, req.game_id)
-        for g in peer.games:
-            if g["id"] == req.game_id:
-                g["has_torrent"] = True
-                break
-    except HTTPException:
+        try:
+            magnet = _fetch_magnet_from_peer(peer.address, peer.port, req.game_id)
+            for g in peer.games:
+                if g["id"] == req.game_id:
+                    g["has_torrent"] = True
+                    break
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(502, f"Magnet-Link vom Host nicht abrufbar: {exc}") from exc
+
+        try:
+            download_id = s.transfer.start_download(
+                game_id=req.game_id,
+                game_name=game.get("name", "Unknown"),
+                magnet=magnet,
+                peer_id=req.peer_id,
+                peer_name=peer.name,
+                peer_address=peer.address,
+                dest_path=dest_path,
+            )
+        except Exception as exc:
+            raise HTTPException(500, f"Download konnte nicht gestartet werden: {exc}") from exc
+
+        out = _status_or_404(s.transfer, download_id)
+        if out.status in ("queued", "downloading", "verifying", "paused", "error"):
+            await broadcast("download_progress", out.model_dump())
+        return out
+    except Exception:
+        s.transfer.release_download_dest(dest_path)
         raise
-    except Exception as exc:
-        raise HTTPException(502, f"Magnet-Link vom Host nicht abrufbar: {exc}") from exc
-
-    dest_path = s.cfg.download_dir / game.get("name", req.game_id)
-
-    try:
-        download_id = s.transfer.start_download(
-            game_id=req.game_id,
-            game_name=game.get("name", "Unknown"),
-            magnet=magnet,
-            peer_id=req.peer_id,
-            peer_name=peer.name,
-            peer_address=peer.address,
-            dest_path=dest_path,
-        )
-    except Exception as exc:
-        raise HTTPException(500, f"Download konnte nicht gestartet werden: {exc}") from exc
-
-    return _status_or_404(s.transfer, download_id)
 
 
 @router.get("/downloads", response_model=list[DownloadOut])

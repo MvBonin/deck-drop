@@ -23,7 +23,25 @@ def _transfer_without_session(cfg) -> TransferManager:
     tm._handles = {}
     tm._paused = {}
     tm._completed_ids = set()
+    tm._pending_download_dests = set()
     return tm
+
+
+def test_reload_excludes_pending_download_dest(cfg):
+    game_dir = cfg.download_dir / "Pending"
+    game_dir.mkdir(parents=True)
+    game_mod.save(game_mod.create_new(game_dir, name="Pending", added_by="test"))
+
+    tm = _transfer_without_session(cfg)
+    tm.reserve_download_dest(game_dir.resolve())
+
+    lib = Library()
+    lib.reload(cfg, exclude_paths=tm.incomplete_download_dest_paths())
+    assert lib.all() == []
+
+    tm.release_download_dest(game_dir.resolve())
+    lib.reload(cfg, exclude_paths=tm.incomplete_download_dest_paths())
+    assert len(lib.all()) == 1
 
 
 def test_reload_excludes_incomplete_download_dest(cfg):
