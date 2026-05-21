@@ -72,4 +72,6 @@ def test_promote_download_to_seed_keeps_handle(tmp_path, monkeypatch):
 
     tm._promote_download_to_seed(h)
     assert tm._seed_handles["g1"] is mock_handle
-    assert "d1" not in tm._handles
+    # _promote only registers the handle for seeding; _poll_loop's done_ids
+    # cleanup removes it from _handles. Verify the torrent was NOT removed.
+    tm._session.remove_torrent.assert_not_called()
