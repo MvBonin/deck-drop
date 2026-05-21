@@ -5,14 +5,16 @@ import { formatApiError } from '../errors.js';
 import { GameCard } from './GameCard.js';
 import { AddGame } from './AddGame.js';
 import { EditGame } from './EditGame.js';
+import { Comments } from './Comments.js';
 import { useGridNav } from '../app.js';
 
 export function MyGames({ wsEvent, showToast }) {
   const [games, setGames]       = useState([]);
   const [prepById, setPrepById] = useState({});
   const [loading, setLoading]   = useState(true);
-  const [showAdd, setShowAdd]   = useState(false);
-  const [editGame, setEditGame] = useState(null);
+  const [showAdd, setShowAdd]         = useState(false);
+  const [editGame, setEditGame]       = useState(null);
+  const [commentsGame, setCommentsGame] = useState(null);
   const gridRef = useRef(null);
   useGridNav(gridRef);
 
@@ -133,6 +135,7 @@ export function MyGames({ wsEvent, showToast }) {
                   prepProgress=${prepById[g.id]}
                   onAction=${() => onRemove(g)}
                   onEdit=${() => setEditGame(g)}
+                  onComments=${() => setCommentsGame(g)}
                 />
               `)}
             </div>`
@@ -147,5 +150,6 @@ export function MyGames({ wsEvent, showToast }) {
 
       ${showAdd && html`<${AddGame} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
       ${editGame && html`<${EditGame} game=${editGame} onClose=${() => setEditGame(null)} onSaved=${onSaved} />`}
+      ${commentsGame && html`<${Comments} game=${commentsGame} onClose=${() => setCommentsGame(null)} />`}
     </div>`;
 }

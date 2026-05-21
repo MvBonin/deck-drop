@@ -4,11 +4,15 @@ import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 
 export function EditGame({ game, onClose, onSaved }) {
-  const [name, setName]         = useState(game.name || '');
-  const [platform, setPlatform] = useState(game.platform || 'any');
-  const [appId, setAppId]       = useState(game.steam_app_id ? String(game.steam_app_id) : '');
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [name, setName]             = useState(game.name || '');
+  const [platform, setPlatform]     = useState(game.platform || 'any');
+  const [appId, setAppId]           = useState(game.steam_app_id ? String(game.steam_app_id) : '');
+  const [description, setDesc]      = useState(game.description || '');
+  const [launchExe, setLaunchExe]   = useState(game.launch_exe || '');
+  const [launchArgs, setLaunchArgs] = useState(game.launch_args || '');
+  const [runner, setRunner]         = useState(game.runner || '');
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState('');
   const firstRef = useRef(null);
 
   useEffect(() => { firstRef.current?.focus(); }, []);
@@ -25,7 +29,14 @@ export function EditGame({ game, onClose, onSaved }) {
     setLoading(true);
     setError('');
     try {
-      const body = { name: name.trim(), platform };
+      const body = {
+        name: name.trim(),
+        platform,
+        description,
+        launch_exe: launchExe,
+        launch_args: launchArgs,
+        runner,
+      };
       if (appId) body.steam_app_id = parseInt(appId, 10);
       const updated = await api.patchGame(game.id, body);
       onSaved(updated);
@@ -73,6 +84,55 @@ export function EditGame({ game, onClose, onSaved }) {
               placeholder="413150"
               value=${appId}
               onInput=${e => setAppId(e.target.value)}
+              disabled=${loading}
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Beschreibung (optional)</label>
+            <textarea
+              class="form-input"
+              rows="3"
+              placeholder="Kurze Beschreibung des Spiels…"
+              value=${description}
+              onInput=${e => setDesc(e.target.value)}
+              disabled=${loading}
+              style="resize:vertical"
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Launch-Exe (optional, für Steam-Shortcut)</label>
+            <input
+              class="form-input"
+              type="text"
+              placeholder="/pfad/zum/spiel.exe"
+              value=${launchExe}
+              onInput=${e => setLaunchExe(e.target.value)}
+              disabled=${loading}
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Launch-Argumente (optional)</label>
+            <input
+              class="form-input"
+              type="text"
+              placeholder="--fullscreen --no-intro"
+              value=${launchArgs}
+              onInput=${e => setLaunchArgs(e.target.value)}
+              disabled=${loading}
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Proton / Runner (optional)</label>
+            <input
+              class="form-input"
+              type="text"
+              placeholder="Proton 9.0"
+              value=${runner}
+              onInput=${e => setRunner(e.target.value)}
               disabled=${loading}
             />
           </div>

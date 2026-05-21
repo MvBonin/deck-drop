@@ -50,6 +50,8 @@ class GameInfo:
     platform: str  # linux | windows | any
     path: Path  # local folder path (not persisted in toml)
     available: bool = True  # False when path doesn't exist on disk
+    description: str = ""
+    launch_exe: str = ""
 
     steam: SteamInfo = field(default_factory=SteamInfo)
     torrent: TorrentInfo = field(default_factory=TorrentInfo)
@@ -62,18 +64,23 @@ class GameInfo:
         return self.path / TOML_FILENAME
 
     def to_dict(self) -> dict[str, Any]:
+        game_block: dict[str, Any] = {
+            "id": self.id,
+            "name": self.name,
+            "version": self.version,
+            "added_at": self.added_at,
+            "added_by": self.added_by,
+            "updated_at": self.updated_at,
+            "updated_by": self.updated_by,
+            "size_bytes": self.size_bytes,
+            "platform": self.platform,
+        }
+        if self.description:
+            game_block["description"] = self.description
+        if self.launch_exe:
+            game_block["launch_exe"] = self.launch_exe
         d: dict[str, Any] = {
-            "game": {
-                "id": self.id,
-                "name": self.name,
-                "version": self.version,
-                "added_at": self.added_at,
-                "added_by": self.added_by,
-                "updated_at": self.updated_at,
-                "updated_by": self.updated_by,
-                "size_bytes": self.size_bytes,
-                "platform": self.platform,
-            },
+            "game": game_block,
             "files": self.files,
         }
         steam = self.steam
@@ -137,6 +144,8 @@ def load_from_path(game_path: Path) -> GameInfo | None:
         platform=g.get("platform", "any"),
         path=game_path,
         available=game_path.exists(),
+        description=g.get("description", ""),
+        launch_exe=g.get("launch_exe", ""),
         steam=SteamInfo(
             app_id=steam_data.get("app_id"),
             install_dir=steam_data.get("install_dir", ""),

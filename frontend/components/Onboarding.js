@@ -36,6 +36,11 @@ export function Onboarding({ onDone }) {
           <div class="onboarding-sub">LAN-Spieleübertragung für Steam Deck</div>
         </div>
 
+        <div style="background:rgba(99,179,237,0.08);border-left:3px solid var(--accent);border-radius:6px;padding:12px 14px;font-size:13px;color:var(--text-dim)">
+          🔒 DeckDrop teilt <strong>ausschließlich im lokalen Netzwerk</strong> –
+          kein Datenverkehr verlässt dein Heimnetz. Auch Tailscale wird unterstützt.
+        </div>
+
         <form onSubmit=${submit} style="display:flex;flex-direction:column;gap:16px">
           <div class="form-group">
             <label class="form-label" for="ob-name">Dein Name im Netzwerk</label>

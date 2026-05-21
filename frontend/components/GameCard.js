@@ -17,7 +17,7 @@ function CoverImage({ game }) {
   return html`<div class="card-cover-placeholder">${initial}</div>`;
 }
 
-export function GameCard({ game, mode = 'own', onAction, onEdit, disabled, prepProgress }) {
+export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, disabled, prepProgress }) {
   const unavailable = mode === 'own' && !game.available;
   const size = game.size_bytes ? fmtBytes(game.size_bytes) : '–';
   const hostPreparing = mode === 'network'
@@ -28,6 +28,14 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, disabled, prepP
     (prepProgress ?? game.torrent_prep_progress ?? 0) * 100,
   );
   const prepFailed = mode === 'own' && !!game.torrent_prep_error;
+
+  const protondbUrl = game.steam_app_id
+    ? `https://www.protondb.com/app/${game.steam_app_id}`
+    : null;
+
+  const shortDesc = game.description
+    ? (game.description.length > 80 ? game.description.slice(0, 80) + '…' : game.description)
+    : null;
 
   const handleKey = (e) => {
     if ((e.key === 'Enter' || e.key === ' ') && !disabled && !unavailable) {
@@ -59,7 +67,20 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, disabled, prepP
           ${mode === 'own' && game.source_peer_name && html`
             · <span>von ${game.source_peer_name}</span>
           `}
+          ${protondbUrl && html`
+            · <a
+                href=${protondbUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style="color:var(--accent);text-decoration:none;font-size:11px"
+                onClick=${e => e.stopPropagation()}
+                tabIndex=${-1}
+              >ProtonDB</a>
+          `}
         </div>
+        ${shortDesc && html`
+          <div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.4">${shortDesc}</div>
+        `}
         ${hostPreparing && html`
           <div class="card-prep">
             <div class="card-prep-label">Game-Hashes berechnen…</div>
@@ -81,7 +102,7 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, disabled, prepP
           : html`<div style="display:flex;gap:6px;align-items:center">
               <button
                 class=${'btn ' + (mode === 'own' ? 'btn-secondary' : 'btn-primary')}
-                style=${mode === 'own' && onEdit ? 'flex:1' : ''}
+                style=${mode === 'own' && (onEdit || onComments) ? 'flex:1' : ''}
                 onClick=${onAction}
                 disabled=${disabled || ownPreparing || hostPreparing}
                 tabIndex=${-1}
@@ -94,6 +115,16 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, disabled, prepP
                       ? '✓ Geteilt'
                       : '↓ Laden'}
               </button>
+              ${mode === 'own' && onComments && html`
+                <button
+                  class="btn btn-ghost"
+                  style="padding:6px 10px;font-size:15px"
+                  onClick=${onComments}
+                  tabIndex=${-1}
+                  title="Kommentare"
+                  aria-label="Kommentare anzeigen"
+                >💬</button>
+              `}
               ${mode === 'own' && onEdit && html`
                 <button
                   class="btn btn-ghost"

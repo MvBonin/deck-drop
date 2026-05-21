@@ -33,7 +33,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    _run(headless=args.headless or args.kiosk, kiosk=args.kiosk, host=args.host, port_override=args.port)
+    _run(
+        headless=args.headless or args.kiosk,
+        kiosk=args.kiosk,
+        host=args.host,
+        port_override=args.port,
+    )
 
 
 def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = False) -> None:
@@ -64,6 +69,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
     library = Library()
     library.reload(cfg)
     peer_registry = PeerRegistry()
+    peer_registry.set_library(library)
 
     # TransferManager is optional (requires libtorrent)
     transfer = None
@@ -110,9 +116,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
         if restored:
             import logging
 
-            logging.getLogger(__name__).info(
-                "Torrent cache restored for %d game(s)", restored
-            )
+            logging.getLogger(__name__).info("Torrent cache restored for %d game(s)", restored)
         for g in library.all():
             if not g.torrent.magnet and not torrent_prep.has_cached_torrent(cfg, g.id):
                 torrent_prep.schedule_prepare(g.id)

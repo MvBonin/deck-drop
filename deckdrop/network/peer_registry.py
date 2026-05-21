@@ -15,6 +15,8 @@ from typing import Any
 import httpx
 
 from deckdrop.api.websocket import broadcast
+from deckdrop.core import game as game_mod
+from deckdrop.core.comments import Comment, load_comments, merge_comments, save_comments
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +48,10 @@ class PeerRegistry:
         self._peers: dict[str, PeerEntry] = {}  # peer_id → PeerEntry
         self._loop: asyncio.AbstractEventLoop | None = None
         self._refresh_task: asyncio.Task | None = None
+        self._library = None  # set via set_library()
+
+    def set_library(self, library: object) -> None:
+        self._library = library
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Bind the uvicorn event loop (required for mDNS thread callbacks)."""
@@ -168,6 +174,9 @@ class PeerRegistry:
         entry.last_seen = time.monotonic()
         log.debug("Fetched %d games from %s", len(games), entry.name)
 
+        if self._library is not None and games:
+            await self._sync_from_peer(games, address, port)
+
         if is_new_peer:
             await broadcast(
                 "peer_online",
@@ -188,6 +197,59 @@ class PeerRegistry:
                     "game_count": len(games),
                 },
             )
+
+    async def _sync_from_peer(self, remote_games: list[dict], address: str, port: int) -> None:
+        """Sync metadata and comments for games we share with this peer."""
+        for rg in remote_games:
+            game_id = rg.get("id")
+            if not game_id:
+                continue
+            local = self._library.get(game_id)
+            if not local:
+                continue
+
+            # Metadata sync: apply remote edits when their version is newer
+            remote_version = rg.get("version", 0)
+            if remote_version > local.version:
+                for attr, key in [
+                    ("name", "name"),
+                    ("platform", "platform"),
+                    ("description", "description"),
+                    ("launch_exe", "launch_exe"),
+                ]:
+                    if key in rg:
+                        setattr(local, attr, rg[key])
+                if "steam_app_id" in rg:
+                    local.steam.app_id = rg["steam_app_id"]
+                local.steam.launch_args = rg.get("launch_args", local.steam.launch_args)
+                local.steam.runner = rg.get("runner", local.steam.runner)
+                local.version = remote_version
+                local.updated_at = rg.get("updated_at", local.updated_at)
+                local.updated_by = rg.get("updated_by", local.updated_by)
+                game_mod.save(local)
+                log.info("Metadata synced for game %s (v%d from peer)", game_id, remote_version)
+
+            # Comment sync: fetch remote comments and merge
+            await self._sync_comments(game_id, local, address, port)
+
+    async def _sync_comments(
+        self, game_id: str, local_game: object, address: str, port: int
+    ) -> None:
+        url = _peer_http_url(address, port, f"/api/games/{game_id}/comments")
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(url)
+                if r.status_code != 200:
+                    return
+            remote = [Comment(**c) for c in r.json()]
+            local_comments = load_comments(local_game.path)
+            merged = merge_comments(local_comments, remote)
+            if len(merged) > len(local_comments):
+                save_comments(local_game.path, merged)
+                added = len(merged) - len(local_comments)
+                log.debug("Merged %d new comment(s) for game %s", added, game_id)
+        except Exception as exc:
+            log.debug("Comment sync failed for %s: %s", game_id, exc)
 
     # -- Queries --
 

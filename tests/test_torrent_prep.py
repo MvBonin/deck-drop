@@ -100,10 +100,13 @@ def test_restore_from_cache_skips_rehash(tmp_path, monkeypatch):
 
     (cfg.torrent_cache / f"{info.id}.torrent").write_bytes(b"cached-torrent")
 
-    with patch(
-        "deckdrop.core.torrent.make_magnet",
-        return_value=("magnet:?xt=urn:btih:abc", "abc"),
-    ), patch("deckdrop.core.torrent.create_torrent_data") as mock_create:
+    with (
+        patch(
+            "deckdrop.core.torrent.make_magnet",
+            return_value=("magnet:?xt=urn:btih:abc", "abc"),
+        ),
+        patch("deckdrop.core.torrent.create_torrent_data") as mock_create,
+    ):
         assert torrent_prep.restore_from_cache(info.id) is True
         mock_create.assert_not_called()
 
