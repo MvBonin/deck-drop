@@ -11,9 +11,9 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-log = logging.getLogger(__name__)
-
 from deckdrop.core.integrity import iter_torrent_files
+
+log = logging.getLogger(__name__)
 
 _LT_MISSING = "libtorrent is not installed. Install it with: pip install libtorrent"
 

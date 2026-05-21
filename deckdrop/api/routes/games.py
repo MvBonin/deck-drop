@@ -140,11 +140,7 @@ class CommentOut(BaseModel):
 @router.get("/games", response_model=list[GameOut])
 def list_games() -> list[GameOut]:
     s = app_state.get()
-    exclude = (
-        s.transfer.incomplete_download_dest_paths()
-        if s.transfer is not None
-        else frozenset()
-    )
+    exclude = s.transfer.incomplete_download_dest_paths() if s.transfer is not None else frozenset()
     s.library.reload(s.cfg, exclude_paths=exclude)
     torrent_prep.restore_all_cached(s.library, s.cfg, s.transfer)
     return [GameOut.from_info(g) for g in s.library.all()]
