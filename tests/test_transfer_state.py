@@ -1,8 +1,10 @@
 """libtorrent state mapping regression tests."""
 
-import libtorrent as lt
+import pytest
 
 from deckdrop.network.transfer import _map_torrent_state
+
+lt = pytest.importorskip("libtorrent")  # skips entire module if libtorrent is absent
 
 
 def test_downloading_state_not_mapped_to_done() -> None:

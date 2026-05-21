@@ -64,8 +64,12 @@ def test_all_network_games_injects_peer_info(registry):
 def test_all_network_games_groups_same_title(registry):
     registry.upsert_sync("p1", "Alice", "192.168.1.10", 7373)
     registry.upsert_sync("p2", "Bob", "192.168.1.11", 7373)
-    registry.get("p1").games = [{"id": "a1", "name": "Portal 2", "size_bytes": 500, "has_torrent": True}]
-    registry.get("p2").games = [{"id": "b1", "name": "Portal 2", "size_bytes": 500, "has_torrent": False}]
+    registry.get("p1").games = [
+        {"id": "a1", "name": "Portal 2", "size_bytes": 500, "has_torrent": True}
+    ]
+    registry.get("p2").games = [
+        {"id": "b1", "name": "Portal 2", "size_bytes": 500, "has_torrent": False}
+    ]
     games = registry.all_network_games()
     assert len(games) == 1
     assert games[0]["peer_count"] == 2
@@ -133,10 +137,15 @@ async def test_refresh_all_online_updates_games(registry):
         await registry.upsert("p1", "Bob", "192.168.1.10", 7373)
         assert len(registry.get_games("p1")) == 1
 
-        route.mock(return_value=httpx.Response(200, json=[
-            {"id": "g1", "name": "Portal 2"},
-            {"id": "g2", "name": "Half-Life"},
-        ]))
+        route.mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {"id": "g1", "name": "Portal 2"},
+                    {"id": "g2", "name": "Half-Life"},
+                ],
+            )
+        )
         await registry.refresh_all_online()
 
     games = registry.get_games("p1")

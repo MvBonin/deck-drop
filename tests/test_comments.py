@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 from deckdrop.api import state as app_state
 from deckdrop.api.server import create_app
 from deckdrop.core import config as cfg_mod
-from deckdrop.core import game as game_mod
 from deckdrop.core.comments import (
     Comment,
     load_comments,
@@ -17,7 +16,6 @@ from deckdrop.core.comments import (
     save_comments,
 )
 from deckdrop.core.library import Library
-
 
 # ── Unit tests: comments.py ───────────────────────────────────────────────────
 
@@ -56,7 +54,7 @@ def test_merge_deduplicates_by_id():
 
 
 def test_merge_sorted_chronologically():
-    older = Comment(id="a", author="A", text="first",  created_at="2026-01-01T10:00:00+00:00")
+    older = Comment(id="a", author="A", text="first", created_at="2026-01-01T10:00:00+00:00")
     newer = Comment(id="b", author="B", text="second", created_at="2026-01-02T10:00:00+00:00")
     merged = merge_comments([newer], [older])
     assert merged[0].id == "a"

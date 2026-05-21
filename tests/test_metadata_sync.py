@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 import respx
 from fastapi.testclient import TestClient
 
@@ -13,7 +13,6 @@ from deckdrop.core import config as cfg_mod
 from deckdrop.core import game as game_mod
 from deckdrop.core.library import Library
 from deckdrop.network.peer_registry import PeerRegistry
-
 
 # ── Fixture ───────────────────────────────────────────────────────────────────
 
@@ -93,23 +92,29 @@ def test_patch_all_new_fields_bumps_version(client_with_game):
     r1 = client.get(f"/api/games/{game_id}")
     v1 = r1.json()["version"]
 
-    r2 = client.patch(f"/api/games/{game_id}", json={
-        "description": "Nice game",
-        "launch_exe": "/path/to/game",
-        "launch_args": "--no-intro",
-        "runner": "Proton GE",
-    })
+    r2 = client.patch(
+        f"/api/games/{game_id}",
+        json={
+            "description": "Nice game",
+            "launch_exe": "/path/to/game",
+            "launch_args": "--no-intro",
+            "runner": "Proton GE",
+        },
+    )
     assert r2.json()["version"] == v1 + 1
 
 
 def test_metadata_persisted_to_toml(client_with_game):
     client, game_id, library = client_with_game
-    client.patch(f"/api/games/{game_id}", json={
-        "description": "My cool game",
-        "launch_exe": "/games/cool.exe",
-        "launch_args": "--dx12",
-        "runner": "Proton 8",
-    })
+    client.patch(
+        f"/api/games/{game_id}",
+        json={
+            "description": "My cool game",
+            "launch_exe": "/games/cool.exe",
+            "launch_args": "--dx12",
+            "runner": "Proton 8",
+        },
+    )
     game = library.get(game_id)
     assert game is not None
     loaded = game_mod.load_from_path(game.path)
