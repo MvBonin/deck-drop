@@ -84,9 +84,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
     app_state.init(cfg, library, peer_registry, transfer)
 
-    exclude = (
-        transfer.incomplete_download_dest_paths() if transfer is not None else frozenset()
-    )
+    exclude = transfer.incomplete_download_dest_paths() if transfer is not None else frozenset()
     library.reload(cfg, exclude_paths=exclude)
 
     # Ensure directories exist

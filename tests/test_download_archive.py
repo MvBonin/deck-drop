@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from deckdrop.network.transfer import (
-    TransferManager,
     _ACTIVE_DOWNLOAD_STATUSES,
+    TransferManager,
     _Handle,
     _PersistedRecord,
 )
@@ -23,8 +23,10 @@ def test_active_download_statuses_excludes_done_and_seeding():
 
 def test_all_statuses_filters_done_paused_record(tmp_path, monkeypatch):
     from deckdrop.core import config as cfg_mod
+    from deckdrop.core import torrent as torrent_mod
 
     monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
+    monkeypatch.setattr(torrent_mod, "lan_session", lambda port: MagicMock())
     cfg = cfg_mod.load()
     cfg_mod.save(cfg)
 
@@ -51,8 +53,10 @@ def test_all_statuses_filters_done_paused_record(tmp_path, monkeypatch):
 def test_promote_download_to_seed_keeps_handle(tmp_path, monkeypatch):
     pytest.importorskip("libtorrent")
     from deckdrop.core import config as cfg_mod
+    from deckdrop.core import torrent as torrent_mod
 
     monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
+    monkeypatch.setattr(torrent_mod, "lan_session", lambda port: MagicMock())
     cfg = cfg_mod.load()
     cfg_mod.save(cfg)
 
@@ -72,4 +76,6 @@ def test_promote_download_to_seed_keeps_handle(tmp_path, monkeypatch):
 
     tm._promote_download_to_seed(h)
     assert tm._seed_handles["g1"] is mock_handle
-    assert "d1" not in tm._handles
+    # _promote only registers the handle for seeding; _poll_loop's done_ids
+    # cleanup removes it from _handles. Verify the torrent was NOT removed.
+    tm._session.remove_torrent.assert_not_called()

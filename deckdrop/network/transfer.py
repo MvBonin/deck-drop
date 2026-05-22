@@ -214,7 +214,9 @@ def _pieces_from_status(s: object) -> tuple[int, int]:
         return 0, 0
     pieces = getattr(s, "pieces", None)
     if pieces is None:
-        return total, 0
+        # libtorrent didn't populate pieces (status() without query_pieces flag).
+        # Treat as unknown – byte-based check in _bytes_complete still catches completion.
+        return 0, 0
     try:
         if hasattr(pieces, "count"):
             have = int(pieces.count(True))
@@ -413,16 +415,6 @@ class TransferManager:
         # Torrent paths are e.g. "GameName/file.bin" – save_path must be the parent dir.
         save_path = dest_path.parent
         save_path.mkdir(parents=True, exist_ok=True)
-
-        from deckdrop.core.game import TOML_FILENAME
-
-        stale_toml = dest_path / TOML_FILENAME
-        if stale_toml.is_file():
-            try:
-                stale_toml.unlink()
-            except OSError as exc:
-                log.warning("Could not remove stale %s before download: %s", stale_toml, exc)
-
         params = _parse_magnet_params(lt, magnet, str(save_path))
         handle = self._session.add_torrent(params)
 
@@ -827,7 +819,10 @@ class TransferManager:
                 downloaded_bytes=rec.downloaded_bytes if rec else 0,
                 total_bytes=rec.total_bytes if rec else 0,
                 num_peers=0,
-                bytes_remaining=max(0, (rec.total_bytes if rec else 0) - (rec.downloaded_bytes if rec else 0)),
+                bytes_remaining=max(
+                    0,
+                    (rec.total_bytes if rec else 0) - (rec.downloaded_bytes if rec else 0),
+                ),
                 error=err,
                 error_hint=hint,
                 dest_path=str(h.dest_path),

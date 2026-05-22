@@ -14,8 +14,10 @@ lt = pytest.importorskip("libtorrent")
 @pytest.fixture
 def transfer(tmp_path, monkeypatch):
     from deckdrop.core import config as cfg_mod
+    from deckdrop.core import torrent as torrent_mod
 
     monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
+    monkeypatch.setattr(torrent_mod, "lan_session", lambda port: MagicMock())
     cfg = cfg_mod.load()
     cfg_mod.save(cfg)
     tm = TransferManager(cfg)

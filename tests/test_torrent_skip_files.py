@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
+from deckdrop.core import torrent_prep
 from deckdrop.core.integrity import (
     TORRENT_SKIP_FILENAMES,
     iter_torrent_files,
     should_include_in_torrent,
 )
-from deckdrop.core import torrent_prep
 
 
 def test_torrent_skip_filenames():
@@ -25,7 +22,7 @@ def test_iter_torrent_files_excludes_metadata(tmp_path):
     game.mkdir()
     (game / "data.bin").write_bytes(b"x" * 10)
     (game / "deckdrop.toml").write_text("id = 'x'\n", encoding="utf-8")
-    (game / "comments.toml").write_text('[[comment]]\n', encoding="utf-8")
+    (game / "comments.toml").write_text("[[comment]]\n", encoding="utf-8")
 
     files = iter_torrent_files(game)
     assert len(files) == 1

@@ -37,9 +37,11 @@ def test_games_changed_same_info_hash():
 def test_upgrade_download_swaps_handle(tmp_path, monkeypatch):
     pytest.importorskip("libtorrent")
     from deckdrop.core import config as cfg_mod
+    from deckdrop.core import torrent as torrent_mod
     from deckdrop.network.transfer import TransferManager, _PersistedRecord
 
     monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
+    monkeypatch.setattr(torrent_mod, "lan_session", lambda port: MagicMock())
     cfg = cfg_mod.load()
     cfg_mod.save(cfg)
 

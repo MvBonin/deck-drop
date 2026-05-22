@@ -10,7 +10,9 @@ def test_game_out_no_prep_for_peer_download(tmp_path, monkeypatch):
     from deckdrop.core import config as cfg_mod
 
     monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
-    app_state.init(cfg_mod.load(), __import__("deckdrop.core.library", fromlist=["Library"]).Library())
+    app_state.init(
+        cfg_mod.load(), __import__("deckdrop.core.library", fromlist=["Library"]).Library()
+    )
 
     info = GameInfo(
         id="abc12345",
