@@ -1,0 +1,24 @@
+{
+  "name": "deck-drop-plugin",
+  "version": "1.0.0",
+  "description": "Decky plugin for DeckDrop LAN game sharing",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w"
+  },
+  "dependencies": {
+    "@decky/api": "^1.0.0",
+    "@decky/ui": "^4.0.0",
+    "react": "^17.0.2",
+    "react-icons": "^4.12.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^25.0.0",
+    "@rollup/plugin-json": "^6.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-replace": "^5.0.0",
+    "@rollup/plugin-typescript": "^11.0.0",
+    "rollup": "^3.0.0",
+    "typescript": "^5.0.0"
+  }
+}

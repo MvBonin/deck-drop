@@ -56,8 +56,16 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
     from deckdrop.network.peer_registry import PeerRegistry
     from deckdrop.single_instance import remove_pid_file, stop_other_instances, write_pid_file
 
+    import os
+
     cfg = cfg_mod.load()
     port = port_override or cfg.port
+
+    # Persist AppImage path so the service manager can use it later
+    appimage_env = os.getenv("APPIMAGE")
+    if appimage_env and cfg.appimage_path != appimage_env:
+        cfg.appimage_path = appimage_env
+        cfg_mod.save(cfg)
 
     stopped = stop_other_instances(port, config_path=cfg_mod.CONFIG_PATH)
     if stopped:
