@@ -43,6 +43,7 @@ def main() -> None:
 
 def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = False) -> None:
     import atexit
+    import os
     from contextlib import asynccontextmanager
 
     import uvicorn
@@ -55,8 +56,6 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
     from deckdrop.network.discovery import DiscoveryService
     from deckdrop.network.peer_registry import PeerRegistry
     from deckdrop.single_instance import remove_pid_file, stop_other_instances, write_pid_file
-
-    import os
 
     cfg = cfg_mod.load()
     port = port_override or cfg.port
