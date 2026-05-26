@@ -1,0 +1,11 @@
+{
+  "name": "DeckDrop",
+  "author": "Mark Bonin",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["games", "network", "transfer"],
+    "description": "LAN game sharing for Steam Deck – no internet, no accounts required.",
+    "image": ""
+  }
+}
