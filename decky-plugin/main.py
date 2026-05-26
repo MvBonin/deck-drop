@@ -13,9 +13,9 @@ import urllib.error
 import urllib.request
 
 try:
-    import decky_plugin
+    import decky
 
-    logger = decky_plugin.logger
+    logger = decky.logger
 except ImportError:
     import logging
 
