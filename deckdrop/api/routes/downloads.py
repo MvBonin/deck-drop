@@ -127,8 +127,9 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
     if stale_toml.is_file():
         try:
             stale_toml.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            import logging
+            logging.getLogger(__name__).warning("Could not remove stale deckdrop.toml at %s: %s", stale_toml, exc)
 
     try:
         try:
