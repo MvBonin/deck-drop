@@ -312,8 +312,7 @@ async def search_cover(game_id: str) -> dict[str, int]:
         raise HTTPException(404, "Spiel nicht gefunden")
 
     search_url = (
-        f"https://store.steampowered.com/api/storesearch/"
-        f"?term={quote(g.name)}&l=english&cc=US"
+        f"https://store.steampowered.com/api/storesearch/?term={quote(g.name)}&l=english&cc=US"
     )
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
