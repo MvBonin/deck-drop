@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 import httpx
@@ -14,6 +15,8 @@ from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
 from deckdrop.api.websocket import broadcast
 from deckdrop.core import game as game_mod
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["downloads"], dependencies=[Depends(local_only)])
 
@@ -128,8 +131,7 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
         try:
             stale_toml.unlink()
         except OSError as exc:
-            import logging
-            logging.getLogger(__name__).warning("Could not remove stale deckdrop.toml at %s: %s", stale_toml, exc)
+            log.warning("Could not remove stale deckdrop.toml at %s: %s", stale_toml, exc)
 
     try:
         try:
