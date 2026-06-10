@@ -1,0 +1,8 @@
+{
+  "name": "DeckDrop",
+  "author": "MvBonin",
+  "version": "1.0.0",
+  "description": "LAN game sharing for Steam Deck – Gaming Mode integration",
+  "tags": ["utility"],
+  "api_version": 1
+}
