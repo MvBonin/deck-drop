@@ -69,6 +69,15 @@ class PeerRegistry:
             self._refresh_task.cancel()
             self._refresh_task = None
 
+    _OFFLINE_TTL = 86400.0  # 24h
+
+    def _evict_stale_peers(self) -> None:
+        cutoff = time.monotonic() - self._OFFLINE_TTL
+        stale = [pid for pid, e in self._peers.items() if not e.online and e.last_seen < cutoff]
+        for pid in stale:
+            log.debug("Evicting stale offline peer %s", pid)
+            del self._peers[pid]
+
     def _needs_fast_refresh(self) -> bool:
         for entry in self._peers.values():
             if not entry.online:
@@ -88,6 +97,7 @@ class PeerRegistry:
                 raise
             except Exception as exc:
                 log.warning("Periodic peer refresh failed: %s", exc)
+            self._evict_stale_peers()
 
     async def refresh_all_online(self) -> None:
         """Re-fetch /api/games from every online peer."""

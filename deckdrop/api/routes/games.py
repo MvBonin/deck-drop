@@ -11,9 +11,13 @@ GET  /api/games/{id}/magnet  Magnet link for transfer
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from urllib.parse import quote
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from deckdrop.api import state as app_state
@@ -29,7 +33,11 @@ from deckdrop.core.comments import (
 from deckdrop.core.config import save as save_cfg
 from deckdrop.core.game import GameInfo
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["games"])
+
+COVER_FILENAMES = ("deckdrop.png", "deckdrop.jpg", "deckdrop.jpeg", "deckdrop.webp")
 
 
 # -- Pydantic schemas --
@@ -46,6 +54,7 @@ class GameOut(BaseModel):
     updated_at: str
     steam_app_id: int | None
     has_torrent: bool
+    has_local_cover: bool = False
     info_hash: str | None = None
     source_peer_name: str | None = None
     torrent_preparing: bool = False
@@ -77,6 +86,7 @@ class GameOut(BaseModel):
             prep_progress = torrent_prep.get_progress(g.id)
             if prep_progress is None:
                 prep_progress = 0.0
+        has_local_cover = any((g.path / name).is_file() for name in COVER_FILENAMES)
         return cls(
             id=g.id,
             name=g.name,
@@ -88,6 +98,7 @@ class GameOut(BaseModel):
             updated_at=g.updated_at,
             steam_app_id=g.steam.app_id,
             has_torrent=has_torrent,
+            has_local_cover=has_local_cover,
             info_hash=g.torrent.info_hash or None,
             source_peer_name=g.origin.peer_name or None,
             torrent_preparing=preparing,
@@ -216,7 +227,7 @@ def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
     if req.platform is not None:
         g.platform = req.platform
         changed = True
-    if req.steam_app_id is not None:
+    if "steam_app_id" in req.model_fields_set:
         g.steam.app_id = req.steam_app_id
         changed = True
     if req.description is not None:
@@ -234,6 +245,7 @@ def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
 
     if changed:
         game_mod.bump_version(g, s.cfg.user_name)
+        game_mod.save(g)
 
     return GameOut.from_info(g)
 
@@ -278,6 +290,48 @@ def add_comment(game_id: str, req: AddCommentRequest) -> CommentOut:
     existing = load_comments(g.path)
     save_comments(g.path, existing + [comment])
     return CommentOut.from_comment(comment)
+
+
+@router.get("/games/{game_id}/cover")
+def get_cover(game_id: str) -> FileResponse:
+    g = app_state.get().library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+    for name in COVER_FILENAMES:
+        p = g.path / name
+        if p.is_file():
+            return FileResponse(p)
+    raise HTTPException(404, "Kein lokales Cover gefunden")
+
+
+@router.post("/games/{game_id}/search_cover", dependencies=[Depends(local_only)])
+async def search_cover(game_id: str) -> dict[str, int]:
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+
+    search_url = (
+        f"https://store.steampowered.com/api/storesearch/?term={quote(g.name)}&l=english&cc=US"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(search_url)
+            r.raise_for_status()
+            items = r.json().get("items", [])
+    except Exception as exc:
+        log.warning("Steam cover search failed for %r: %s", g.name, exc)
+        raise HTTPException(502, f"Steam-Suche fehlgeschlagen: {exc}") from exc
+
+    if not items:
+        raise HTTPException(404, "Kein Steam-Treffer für diesen Spielnamen")
+
+    app_id: int = items[0]["id"]
+    g.steam.app_id = app_id
+    game_mod.bump_version(g, s.cfg.user_name)
+    game_mod.save(g)
+    log.info("Auto-assigned steam_app_id=%d to game %s via search", app_id, game_id)
+    return {"steam_app_id": app_id}
 
 
 @router.get("/games/{game_id}/magnet")

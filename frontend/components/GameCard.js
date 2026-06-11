@@ -1,17 +1,33 @@
 import { html } from 'htm/preact';
+import { useState } from 'preact/hooks';
 import { fmtBytes } from '../api.js';
+
+const PLACEHOLDER_STYLE = 'display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:52px;font-weight:800;color:var(--accent)';
 
 function CoverImage({ game }) {
   const initial = (game.name || '?')[0].toUpperCase();
-  if (game.steam_app_id) {
+  const [steamFailed, setSteamFailed] = useState(false);
+
+  if (game.has_local_cover) {
+    return html`
+      <div class="card-cover">
+        <img
+          src="/api/games/${game.id}/cover"
+          alt=${game.name}
+          onError=${e => { e.target.style.display='none'; e.target.parentNode.querySelector('.placeholder-text').style.display='flex'; }}
+        />
+        <span class="placeholder-text" style=${PLACEHOLDER_STYLE}>${initial}</span>
+      </div>`;
+  }
+  if (game.steam_app_id && !steamFailed) {
     return html`
       <div class="card-cover">
         <img
           src="https://cdn.cloudflare.steamstatic.com/steam/apps/${game.steam_app_id}/library_600x900.jpg"
           alt=${game.name}
-          onError=${e => { e.target.style.display='none'; e.target.parentNode.querySelector('.placeholder-text').style.display='flex'; }}
+          onError=${() => setSteamFailed(true)}
         />
-        <span class="placeholder-text" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:52px;font-weight:800;color:var(--accent)">${initial}</span>
+        <span class="placeholder-text" style=${PLACEHOLDER_STYLE}>${initial}</span>
       </div>`;
   }
   return html`<div class="card-cover-placeholder">${initial}</div>`;

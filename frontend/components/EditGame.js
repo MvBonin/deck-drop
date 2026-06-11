@@ -12,6 +12,7 @@ export function EditGame({ game, onClose, onSaved }) {
   const [launchArgs, setLaunchArgs] = useState(game.launch_args || '');
   const [runner, setRunner]         = useState(game.runner || '');
   const [loading, setLoading]       = useState(false);
+  const [searching, setSearching]   = useState(false);
   const [error, setError]           = useState('');
   const firstRef = useRef(null);
 
@@ -22,6 +23,19 @@ export function EditGame({ game, onClose, onSaved }) {
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
+
+  const searchCover = async () => {
+    setSearching(true);
+    setError('');
+    try {
+      const res = await api.searchCover(game.id);
+      setAppId(String(res.steam_app_id));
+    } catch (err) {
+      setError('Keine Cover Art auf Steam gefunden');
+    } finally {
+      setSearching(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -78,14 +92,30 @@ export function EditGame({ game, onClose, onSaved }) {
 
           <div class="form-group">
             <label class="form-label">Steam App-ID (optional, für Cover)</label>
-            <input
-              class="form-input"
-              type="number"
-              placeholder="413150"
-              value=${appId}
-              onInput=${e => setAppId(e.target.value)}
-              disabled=${loading}
-            />
+            <div style="display:flex;gap:8px;align-items:center">
+              <input
+                class="form-input"
+                type="number"
+                placeholder="413150"
+                value=${appId}
+                onInput=${e => setAppId(e.target.value)}
+                disabled=${loading || searching}
+                style="flex:1"
+              />
+              <button
+                type="button"
+                class="btn btn-ghost"
+                style="white-space:nowrap;padding:8px 12px;font-size:13px"
+                onClick=${searchCover}
+                disabled=${loading || searching}
+                title="Automatisch auf Steam suchen"
+              >
+                ${searching ? html`<span class="spinner"></span>` : '🔍 Suchen'}
+              </button>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px">
+              Oder <code>deckdrop.png</code> direkt in den Spielordner legen.
+            </div>
           </div>
 
           <div class="form-group">
