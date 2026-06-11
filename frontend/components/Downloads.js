@@ -113,7 +113,11 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
           <span>↓ <span class="stat-val">${fmtSpeed(dl.speed_bytes_sec)}</span></span>
           <span><span class="stat-val">${dl.num_peers}</span> Peer${dl.num_peers !== 1 ? 's' : ''}</span>
         `}
-        <span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>
+        ${dl.total_bytes > 0
+          ? html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`
+          : (dl.status === 'queued' || dl.status === 'downloading')
+            ? html`<span style="color:var(--text-dim)">${dl.num_peers > 0 ? 'Metadaten werden geladen…' : 'Verbinde mit Host…'}</span>`
+            : html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`}
         ${sprint && html`<span style="color:var(--accent)">${sprint}</span>`}
         ${pct >= 99.5 && dl.bytes_remaining > 0 && (dl.status === 'downloading' || dl.status === 'verifying') && html`
           <span style="color:var(--text-dim);font-size:12px">Host-Verbindung wird erneuert…</span>

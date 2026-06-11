@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import os
 import subprocess
 import sys
@@ -87,6 +88,24 @@ def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _enable_linger() -> None:
+    """Allow the user service to run after reboot without an active session."""
+    try:
+        user = os.getenv("USER") or getpass.getuser()
+    except Exception:
+        return
+    if not user:
+        return
+    try:
+        subprocess.run(
+            ["loginctl", "enable-linger", user],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        pass
+
+
 def is_enabled() -> bool:
     return _systemctl("is-enabled", _SERVICE_NAME).returncode == 0
 
@@ -105,8 +124,38 @@ def enable(install_type: InstallType, appimage_path: str = "") -> None:
     _UNIT_FILE.write_text(
         _unit_content(exec_start, appimage_path=resolved_appimage),
     )
+    _enable_linger()
     _systemctl("daemon-reload")
     _systemctl("enable", "--now", _SERVICE_NAME)
+
+
+def refresh_appimage_path(appimage_path: str) -> bool:
+    """Point an already-installed AppImage service at the given AppImage.
+
+    Used so launching a newer AppImage replaces the old path in the service.
+    Only rewrites the unit file + daemon-reload (no restart); the new version
+    is picked up on the next service start/reboot. No-op when the service is
+    not installed, is not an AppImage install, or already points at this path.
+    Returns True if the unit file was changed.
+    """
+    if not appimage_path or not _UNIT_FILE.exists():
+        return False
+    try:
+        current = _UNIT_FILE.read_text()
+    except OSError:
+        return False
+    # Don't clobber a flatpak/pipx install.
+    if ".AppImage" not in current:
+        return False
+    new_content = _unit_content(
+        _exec_start("appimage", appimage_path),
+        appimage_path=appimage_path,
+    )
+    if new_content == current:
+        return False
+    _UNIT_FILE.write_text(new_content)
+    _systemctl("daemon-reload")
+    return True
 
 
 def disable() -> None:

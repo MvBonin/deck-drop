@@ -180,6 +180,10 @@ _STALL_RECHECK_AFTER = 90.0
 _STALL_ERROR_AFTER = 600.0
 _STALL_REMAINING_MAX = 5 * 1024 * 1024  # only nudge when < 5 MiB left
 
+# Metadata phase (no torrent info yet, e.g. restored magnet after a restart):
+# DHT/trackers are LAN-only, so reconnect to the known host to fetch metadata fast.
+_METADATA_NUDGE_INTERVAL = 5.0
+
 
 def _bytes_from_status(s: object) -> tuple[int, int, int]:
     """Return (downloaded_bytes, total_bytes, bytes_remaining)."""
@@ -293,6 +297,7 @@ class TransferManager:
         self._last_progress_at: dict[str, float] = {}
         self._last_nudge_at: dict[str, float] = {}
         self._last_reannounce_at: dict[str, float] = {}
+        self._last_meta_nudge_at: dict[str, float] = {}
         self._recheck_done: set[str] = set()
         self._last_magnet_check_at: dict[str, float] = {}
         self._pending_download_dests: set[Path] = set()
@@ -526,6 +531,7 @@ class TransferManager:
         self._last_progress_at.pop(download_id, None)
         self._last_nudge_at.pop(download_id, None)
         self._last_reannounce_at.pop(download_id, None)
+        self._last_meta_nudge_at.pop(download_id, None)
         self._last_magnet_check_at.pop(download_id, None)
         self._recheck_done.discard(download_id)
         self._user_paused.discard(download_id)
@@ -566,6 +572,7 @@ class TransferManager:
         self._last_progress_at.pop(download_id, None)
         self._last_nudge_at.pop(download_id, None)
         self._last_reannounce_at.pop(download_id, None)
+        self._last_meta_nudge_at.pop(download_id, None)
         self._last_magnet_check_at.pop(download_id, None)
         self._recheck_done.discard(download_id)
 
@@ -587,6 +594,7 @@ class TransferManager:
         self._last_progress_at.pop(download_id, None)
         self._last_nudge_at.pop(download_id, None)
         self._last_reannounce_at.pop(download_id, None)
+        self._last_meta_nudge_at.pop(download_id, None)
         self._last_magnet_check_at.pop(download_id, None)
         self._recheck_done.discard(download_id)
         if h:
@@ -907,6 +915,28 @@ class TransferManager:
             self._last_progress_at[download_id] = now
             self._last_downloaded[download_id] = downloaded_bytes
 
+    def _nudge_metadata(self, h: _Handle, status: DownloadStatus) -> None:
+        """Reconnect to the host while torrent metadata is still missing.
+
+        After a restart a magnet is re-attached with total_bytes == 0 until the
+        metadata arrives. DHT/trackers are LAN-only, so we periodically reconnect
+        to the known peer to fetch it instead of waiting for mDNS rediscovery.
+        """
+        if status.status != "queued" or status.total_bytes > 0:
+            return
+        rec = self._paused.get(h.download_id)
+        if not rec or not rec.peer_address:
+            return
+        now = time.monotonic()
+        if now - self._last_meta_nudge_at.get(h.download_id, 0) < _METADATA_NUDGE_INTERVAL:
+            return
+        self._last_meta_nudge_at[h.download_id] = now
+        try:
+            h.handle.connect_peer((rec.peer_address, self._cfg.torrent_port))
+            log.debug("metadata nudge: connect_peer for %s", h.download_id)
+        except Exception as exc:
+            log.warning("metadata nudge connect_peer failed for %s: %s", h.download_id, exc)
+
     def _nudge_stalled_download(self, h: _Handle, status: DownloadStatus) -> None:
         """Reconnect to host when near-complete; error if stuck too long."""
         if status.status not in ("downloading", "queued", "verifying"):
@@ -1069,6 +1099,7 @@ class TransferManager:
                     done_ids.append(status.id)
                     continue
 
+                self._nudge_metadata(h, status)
                 self._nudge_stalled_download(h, status)
                 await broadcast("download_progress", self._progress_payload(status))
 
@@ -1105,6 +1136,7 @@ class TransferManager:
                 self._last_progress_at.pop(did, None)
                 self._last_nudge_at.pop(did, None)
                 self._last_reannounce_at.pop(did, None)
+                self._last_meta_nudge_at.pop(did, None)
                 self._last_magnet_check_at.pop(did, None)
                 self._recheck_done.discard(did)
                 if h:

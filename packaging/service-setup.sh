@@ -71,6 +71,9 @@ ${APPIMAGE_ENV}
 WantedBy=default.target
 EOF
 
+# Let the user service run after reboot without an active login session.
+loginctl enable-linger "$USER" 2>/dev/null || true
+
 systemctl --user daemon-reload
 systemctl --user enable --now "$SERVICE"
 

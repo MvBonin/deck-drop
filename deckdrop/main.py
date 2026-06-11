@@ -66,6 +66,24 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
         cfg.appimage_path = appimage_env
         cfg_mod.save(cfg)
 
+    # Keep an installed service pointing at the currently running AppImage so a
+    # newer AppImage replaces the old (stale) path. No-op for the headless
+    # service itself (same path) or non-AppImage installs.
+    if appimage_env:
+        try:
+            from deckdrop.core import service as svc_mod
+
+            if svc_mod.refresh_appimage_path(appimage_env):
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "Service-Unit auf aktuelle AppImage aktualisiert: %s", appimage_env
+                )
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("Service-Unit-Refresh fehlgeschlagen: %s", exc)
+
     stopped = stop_other_instances(port, config_path=cfg_mod.CONFIG_PATH)
     if stopped:
         pids = ", ".join(str(p) for p in stopped)
