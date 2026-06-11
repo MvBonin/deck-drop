@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -14,11 +15,32 @@ _UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 _UNIT_FILE = _UNIT_DIR / "deckdrop.service"
 
 
-def detect_install_type() -> InstallType:
-    """Detect how DeckDrop is installed based on environment variables."""
+def _find_appimage() -> str:
+    """Locate a DeckDrop AppImage under $HOME (same heuristic as service-setup.sh)."""
+    home = Path.home()
+    try:
+        found = sorted(home.glob("DeckDrop-*.AppImage"), key=lambda p: p.name)
+        if found:
+            return str(found[-1])
+        for path in home.rglob("DeckDrop-*.AppImage"):
+            if path.is_file() and len(path.relative_to(home).parts) <= 4:
+                return str(path)
+    except OSError:
+        pass
+    return ""
+
+
+def detect_install_type(appimage_path: str = "") -> InstallType:
+    """Detect how DeckDrop is installed based on environment and config."""
     if os.getenv("FLATPAK_ID"):
         return "flatpak"
     if os.getenv("APPIMAGE"):
+        return "appimage"
+    if appimage_path and Path(appimage_path).is_file():
+        return "appimage"
+    if getattr(sys, "frozen", False):
+        return "appimage"
+    if _find_appimage():
         return "appimage"
     return "pipx"
 
@@ -34,7 +56,11 @@ def _exec_start(install_type: InstallType, appimage_path: str = "") -> str:
     return "%h/.local/bin/deckdrop --headless"
 
 
-def _unit_content(exec_start: str) -> str:
+def _unit_content(exec_start: str, *, appimage_path: str = "") -> str:
+    env_lines = ["Environment=PYTHONUNBUFFERED=1"]
+    if appimage_path:
+        env_lines.append(f"Environment=APPIMAGE={appimage_path}")
+    env_block = "\n".join(env_lines)
     return (
         "[Unit]\n"
         "Description=DeckDrop LAN Game Sharing\n"
@@ -46,7 +72,7 @@ def _unit_content(exec_start: str) -> str:
         f"ExecStart={exec_start}\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
-        "Environment=PYTHONUNBUFFERED=1\n"
+        f"{env_block}\n"
         "\n"
         "[Install]\n"
         "WantedBy=default.target\n"
@@ -71,9 +97,14 @@ def is_active() -> bool:
 
 def enable(install_type: InstallType, appimage_path: str = "") -> None:
     """Write the unit file and enable the service."""
-    exec_start = _exec_start(install_type, appimage_path)
+    resolved_appimage = ""
+    if install_type == "appimage":
+        resolved_appimage = appimage_path or os.getenv("APPIMAGE", "") or _find_appimage()
+    exec_start = _exec_start(install_type, resolved_appimage)
     _UNIT_DIR.mkdir(parents=True, exist_ok=True)
-    _UNIT_FILE.write_text(_unit_content(exec_start))
+    _UNIT_FILE.write_text(
+        _unit_content(exec_start, appimage_path=resolved_appimage),
+    )
     _systemctl("daemon-reload")
     _systemctl("enable", "--now", _SERVICE_NAME)
 

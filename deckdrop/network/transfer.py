@@ -245,6 +245,29 @@ def _torrent_is_complete(lt: object, s: object) -> bool:
     return total > 0 and downloaded >= total
 
 
+def _status_flags(lt: object) -> int:
+    """Status query flags for accurate byte counters and piece info."""
+    th = lt.torrent_handle
+    flags = 0
+    for name in ("query_accurate_download_counters", "query_pieces"):
+        bit = getattr(th, name, None)
+        if bit is not None:
+            flags |= int(bit)
+    return flags
+
+
+def _torrent_status(handle: object) -> object:
+    """Return torrent_status with accurate counters when supported."""
+    lt = _lt()
+    flags = _status_flags(lt)
+    if flags:
+        try:
+            return handle.status(flags)
+        except (TypeError, ValueError):
+            pass
+    return handle.status()
+
+
 def _progress_from_status(s: object) -> float:
     """Prefer byte ratio; libtorrent's progress can lag or jump."""
     downloaded, total, _ = _bytes_from_status(s)
@@ -736,7 +759,7 @@ class TransferManager:
     def _build_status(self, h: _Handle) -> DownloadStatus:
         _lt()  # verify installed
         try:
-            s = h.handle.status()
+            s = _torrent_status(h.handle)
             lt = _lt()
             state_int = int(s.state)
             status_str = _map_torrent_state(lt, state_int)
@@ -1037,7 +1060,7 @@ class TransferManager:
                 status = self._build_status(h)
 
                 lt = _lt()
-                is_complete = _torrent_is_complete(lt, h.handle.status())
+                is_complete = _torrent_is_complete(lt, _torrent_status(h.handle))
 
                 if is_complete and status.status != "error":
                     await self._finalize_download(h, status)

@@ -141,6 +141,16 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
 
   useEffect(() => { load(); }, []);
 
+  // Poll while downloads are active (covers missed WebSocket updates)
+  useEffect(() => {
+    const active = downloads.some(d =>
+      d.status === 'downloading' || d.status === 'queued' || d.status === 'verifying'
+    );
+    if (!active) return;
+    const t = setInterval(load, 2000);
+    return () => clearInterval(t);
+  }, [downloads]);
+
   useEffect(() => {
     if (!wsEvent) return;
     if (wsEvent.event === 'download_torrent_upgraded') {

@@ -46,6 +46,12 @@ fi
 echo "Install type: $INSTALL_TYPE"
 echo "ExecStart:    $EXEC_START"
 
+APPIMAGE_ENV=""
+if [ "$INSTALL_TYPE" = "appimage" ]; then
+    APPIMAGE_PATH="${EXEC_START% --headless}"
+    APPIMAGE_ENV="Environment=APPIMAGE=${APPIMAGE_PATH}"
+fi
+
 mkdir -p "$UNIT_DIR"
 cat > "$UNIT_FILE" << EOF
 [Unit]
@@ -59,6 +65,7 @@ ExecStart=${EXEC_START}
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+${APPIMAGE_ENV}
 
 [Install]
 WantedBy=default.target

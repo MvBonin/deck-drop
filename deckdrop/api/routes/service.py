@@ -21,17 +21,18 @@ class ServiceStatus(BaseModel):
 
 @router.get("/service", response_model=ServiceStatus)
 def get_service_status() -> ServiceStatus:
+    cfg = app_state.get().cfg
     return ServiceStatus(
         enabled=svc.is_enabled(),
         active=svc.is_active(),
-        install_type=svc.detect_install_type(),
+        install_type=svc.detect_install_type(cfg.appimage_path),
     )
 
 
 @router.post("/service/enable", response_model=ServiceStatus)
 def enable_service() -> ServiceStatus:
     cfg = app_state.get().cfg
-    install_type = svc.detect_install_type()
+    install_type = svc.detect_install_type(cfg.appimage_path)
     try:
         svc.enable(install_type, cfg.appimage_path)
     except ValueError as e:

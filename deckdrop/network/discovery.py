@@ -7,6 +7,7 @@ Service type: _deckdrop._tcp.local.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import socket
@@ -99,20 +100,16 @@ class DiscoveryService:
         self._zc: AsyncZeroconf | None = None
         self._browser: ServiceBrowser | None = None
         self._service_info: ServiceInfo | None = None
+        self._ip_watch_task: asyncio.Task | None = None
+        self._cfg: Config | None = None
 
-    async def start(
-        self,
-        cfg: Config,
-        on_peer_found: Callable[[str, str, str, int], None],
-        on_peer_lost: Callable[[str], None],
-    ) -> None:
+    def _build_service_info(self, cfg: Config, lan_ip: str) -> ServiceInfo:
         hostname = socket.gethostname()
         service_name = f"deckdrop-{cfg.peer_id[:8]}.{SERVICE_TYPE}"
-
-        self._service_info = ServiceInfo(
+        return ServiceInfo(
             SERVICE_TYPE,
             service_name,
-            addresses=[socket.inet_aton(self._local_ip())],
+            addresses=[socket.inet_aton(lan_ip)],
             port=cfg.port,
             properties={
                 "peer_id": cfg.peer_id,
@@ -122,16 +119,64 @@ class DiscoveryService:
             },
         )
 
-        self._zc = AsyncZeroconf()
+    async def _register_service(self, cfg: Config) -> str:
+        lan_ip = self._local_ip()
+        self._service_info = self._build_service_info(cfg, lan_ip)
+        if self._zc is None:
+            self._zc = AsyncZeroconf()
         await self._zc.async_register_service(self._service_info)
+        return lan_ip
+
+    async def _watch_lan_ip(self) -> None:
+        """Re-register mDNS when the LAN IP becomes available (systemd boot race)."""
+        while self._zc and self._cfg:
+            await asyncio.sleep(5)
+            if not self._service_info:
+                continue
+            current = self._local_ip()
+            announced = socket.inet_ntoa(self._service_info.addresses[0])
+            if current == announced or current == "127.0.0.1":
+                continue
+            if announced != "127.0.0.1":
+                continue
+            try:
+                await self._zc.async_unregister_service(self._service_info)
+            except Exception:
+                pass
+            announced = await self._register_service(self._cfg)
+            log.info("Discovery re-registered on LAN IP %s", announced)
+
+    async def start(
+        self,
+        cfg: Config,
+        on_peer_found: Callable[[str, str, str, int], None],
+        on_peer_lost: Callable[[str], None],
+    ) -> None:
+        self._cfg = cfg
+        lan_ip = await self._register_service(cfg)
         self._browser = ServiceBrowser(
             self._zc.zeroconf,
             SERVICE_TYPE,
             _Listener(cfg.peer_id, on_peer_found, on_peer_lost),
         )
-        log.info("Discovery started as %s", service_name)
+        log.info(
+            "Discovery started as deckdrop-%s.%s (%s)",
+            cfg.peer_id[:8],
+            SERVICE_TYPE,
+            lan_ip,
+        )
+        if lan_ip == "127.0.0.1":
+            log.warning("LAN IP not ready yet – retrying mDNS registration every 5s")
+            self._ip_watch_task = asyncio.create_task(self._watch_lan_ip())
 
     async def stop(self) -> None:
+        if self._ip_watch_task:
+            self._ip_watch_task.cancel()
+            try:
+                await self._ip_watch_task
+            except asyncio.CancelledError:
+                pass
+            self._ip_watch_task = None
         if self._zc and self._service_info:
             try:
                 await self._zc.async_unregister_service(self._service_info)
@@ -140,6 +185,8 @@ class DiscoveryService:
         if self._zc:
             await self._zc.async_close()
             self._zc = None
+        self._service_info = None
+        self._cfg = None
         log.info("Discovery stopped")
 
     @staticmethod

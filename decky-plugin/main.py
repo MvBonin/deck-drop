@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 try:
     import decky
@@ -46,9 +47,32 @@ def _systemctl(*args: str) -> bool:
     )
 
 
+def _find_appimage() -> str | None:
+    """Locate a DeckDrop AppImage under $HOME (same heuristic as service-setup.sh)."""
+    home = Path.home()
+    try:
+        found = sorted(
+            home.glob("DeckDrop-*.AppImage"),
+            key=lambda p: p.name,
+        )
+        if found:
+            return str(found[-1])
+        for path in home.rglob("DeckDrop-*.AppImage"):
+            if path.is_file() and len(path.relative_to(home).parts) <= 4:
+                return str(path)
+    except OSError:
+        pass
+    return None
+
+
 def _is_installed() -> bool:
-    """Check whether deckdrop is installed (pipx/native or Flatpak)."""
+    """Check whether deckdrop is installed (pipx, AppImage, Flatpak, or service)."""
     if shutil.which("deckdrop"):
+        return True
+    if _find_appimage():
+        return True
+    unit = Path.home() / ".config/systemd/user/deckdrop.service"
+    if unit.is_file():
         return True
     result = subprocess.run(
         ["flatpak", "list", "--app", "--columns=application"],
@@ -63,8 +87,9 @@ class Plugin:
         """Return install state, service state, and API reachability."""
         api_info = _http("/status")
         service_info = _http("/service")
+        api_reachable = bool(api_info)
         return {
-            "installed": _is_installed(),
+            "installed": _is_installed() or api_reachable,
             "service_enabled": service_info.get("enabled", _systemctl("is-enabled", _SERVICE)),
             "service_active": _systemctl("is-active", _SERVICE),
             "api_reachable": bool(api_info),
