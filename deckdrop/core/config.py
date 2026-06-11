@@ -37,6 +37,10 @@ _DEFAULTS: dict[str, Any] = {
         "max_connections": 50,
         "seed_after_download": True,
     },
+    "service": {
+        "autostart": False,
+        "appimage_path": "",
+    },
 }
 
 
@@ -137,6 +141,24 @@ class Config:
     @max_download_speed.setter
     def max_download_speed(self, value: int) -> None:
         self._data["transfer"]["max_download_speed"] = value
+
+    # -- service --
+
+    @property
+    def autostart(self) -> bool:
+        return self._data["service"]["autostart"]
+
+    @autostart.setter
+    def autostart(self, value: bool) -> None:
+        self._data["service"]["autostart"] = value
+
+    @property
+    def appimage_path(self) -> str:
+        return self._data["service"]["appimage_path"]
+
+    @appimage_path.setter
+    def appimage_path(self, value: str) -> None:
+        self._data["service"]["appimage_path"] = value
 
     def to_dict(self) -> dict[str, Any]:
         return self._data

@@ -9,11 +9,7 @@ fi
 
 pipx install .
 
-SVCDIR="$HOME/.config/systemd/user"
-mkdir -p "$SVCDIR"
-cp packaging/deckdrop.service "$SVCDIR/deckdrop.service"
-systemctl --user daemon-reload
-systemctl --user enable --now deckdrop
+bash packaging/service-setup.sh
 
 APPDIR="$HOME/.local/share/applications"
 mkdir -p "$APPDIR"

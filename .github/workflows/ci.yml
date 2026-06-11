@@ -91,6 +91,30 @@ jobs:
           fi
           echo "Import consistency OK."
 
+  flatpak-sources:
+    name: Flatpak sources not placeholder
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check python3-deckdrop-deps.json is populated
+        run: |
+          python3 - << 'EOF'
+          import json, sys
+          with open("packaging/python3-deckdrop-deps.json") as f:
+              data = json.load(f)
+          modules = data.get("modules", [])
+          if not modules:
+              print("ERROR: python3-deckdrop-deps.json has no modules (still a placeholder).")
+              print("Run: bash packaging/generate-flatpak-sources.sh")
+              sys.exit(1)
+          total_sources = sum(len(m.get("sources", [])) for m in modules)
+          if total_sources == 0:
+              print("ERROR: All modules have empty sources (placeholder not replaced).")
+              sys.exit(1)
+          print(f"OK: {len(modules)} modules, {total_sources} sources.")
+          EOF
+
   e2e:
     name: Frontend e2e (Playwright)
     runs-on: ubuntu-latest
