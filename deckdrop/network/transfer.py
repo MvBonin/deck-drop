@@ -1042,7 +1042,9 @@ class TransferManager:
                     pieces_missing=status.pieces_missing,
                     pieces_total=status.pieces_total,
                 )
-                is_complete = status.status in ("done", "seeding") or bytes_done
+                # Only trust byte-level confirmation; libtorrent can report "seeding"
+                # before data is actually transferred (e.g. when metadata is missing).
+                is_complete = bytes_done
 
                 if is_complete and status.status != "error":
                     await self._finalize_download(h, status)

@@ -22,7 +22,7 @@ const STATUS_COLOR = {
 };
 
 const ACTIVE_DOWNLOAD_STATUSES = new Set([
-  'queued', 'downloading', 'verifying', 'paused', 'error',
+  'queued', 'downloading', 'verifying', 'paused', 'error', 'done',
 ]);
 
 /** Progress 0–100 as float (not rounded). */
@@ -143,9 +143,6 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
 
   useEffect(() => {
     if (!wsEvent) return;
-    if (wsEvent.event === 'download_complete') {
-      setDownloads(prev => prev.filter(d => d.id !== wsEvent.data.id));
-    }
     if (wsEvent.event === 'download_torrent_upgraded') {
       setDownloads(prev =>
         prev.map(d => d.id === wsEvent.data.id
