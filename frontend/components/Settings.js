@@ -8,9 +8,15 @@ export function Settings({ showToast }) {
   const [saving, setSaving]   = useState(false);
   const [showExit, setShowExit] = useState(false);
   const [exiting, setExiting]   = useState(false);
+  const [svc, setSvc]           = useState(null);
+  const [svcLoading, setSvcLoading] = useState(false);
 
   const load = async () => {
-    try { setCfg(await api.settings()); } catch {}
+    try {
+      const [settings, service] = await Promise.all([api.settings(), api.serviceStatus().catch(() => null)]);
+      setCfg(settings);
+      setSvc(service);
+    } catch {}
   };
   useEffect(() => { load(); }, []);
 
@@ -28,6 +34,32 @@ export function Settings({ showToast }) {
     }
   };
 
+  const enableService = async () => {
+    setSvcLoading(true);
+    try {
+      const result = await api.enableService();
+      setSvc(result);
+      showToast('Service installiert und gestartet ✓');
+    } catch (err) {
+      showToast(`Fehler: ${formatApiError(err, 'service')}`);
+    } finally {
+      setSvcLoading(false);
+    }
+  };
+
+  const disableService = async () => {
+    setSvcLoading(true);
+    try {
+      const result = await api.disableService();
+      setSvc(result);
+      showToast('Service deaktiviert');
+    } catch (err) {
+      showToast(`Fehler: ${formatApiError(err, 'service')}`);
+    } finally {
+      setSvcLoading(false);
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -36,7 +68,6 @@ export function Settings({ showToast }) {
         download_dir:      cfg.download_dir,
         max_upload_speed:  cfg.max_upload_speed,
         max_download_speed:cfg.max_download_speed,
-        seed_after_download: cfg.seed_after_download,
       });
       showToast('Einstellungen gespeichert ✓');
     } catch (err) {
@@ -97,16 +128,6 @@ export function Settings({ showToast }) {
       <div class="settings-section">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Nach Download seeden</div>
-            <div class="settings-row-sub">Teile Daten mit anderen Peers</div>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" checked=${cfg.seed_after_download} onChange=${e => update('seed_after_download', e.target.checked)} />
-            <span class="toggle-track"></span>
-          </label>
-        </div>
-        <div class="settings-row">
-          <div>
             <div class="settings-row-label">Upload-Limit</div>
             <div class="settings-row-sub">0 = unbegrenzt (KB/s)</div>
           </div>
@@ -154,6 +175,37 @@ export function Settings({ showToast }) {
       </p>
 
       <p class="settings-section-title">Anwendung</p>
+      ${svc && html`
+        <div class="settings-section">
+          <div class="settings-row">
+            <div>
+              <div class="settings-row-label">Als Service starten</div>
+              <div class="settings-row-sub">DeckDrop automatisch im Hintergrund starten (systemd)</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span style="font-size:12px;color:${svc.active ? 'var(--success)' : 'var(--text-dim)'}">
+                ${svc.active ? '● Aktiv' : '○ Inaktiv'}
+              </span>
+              ${svc.enabled
+                ? html`<button
+                    type="button"
+                    class="btn btn-ghost"
+                    style="padding:4px 12px;font-size:12px"
+                    onClick=${disableService}
+                    disabled=${svcLoading}
+                  >${svcLoading ? html`<span class="spinner"></span>` : 'Deaktivieren'}</button>`
+                : html`<button
+                    type="button"
+                    class="btn btn-primary"
+                    style="padding:4px 12px;font-size:12px"
+                    onClick=${enableService}
+                    disabled=${svcLoading}
+                  >${svcLoading ? html`<span class="spinner"></span>` : 'Als Service installieren'}</button>`
+              }
+            </div>
+          </div>
+        </div>
+      `}
       <div class="settings-section">
         <button
           type="button"

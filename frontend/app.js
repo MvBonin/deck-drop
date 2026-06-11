@@ -44,7 +44,7 @@ function App() {
   const [toast, setToast]         = useState('');
   const toastTimer = useRef(null);
 
-  const ACTIVE_DL = new Set(['queued', 'downloading', 'verifying', 'paused', 'error']);
+  const ACTIVE_DL = new Set(['queued', 'downloading', 'verifying', 'paused', 'error', 'done']);
 
   const mergeDownload = useCallback((dl) => {
     if (!dl?.id || !ACTIVE_DL.has(dl.status)) return;
@@ -73,7 +73,10 @@ function App() {
           mergeDownload(msg.data);
         }
         if (msg.event === 'download_complete') {
-          setDownloads(prev => prev.filter(d => d.id !== msg.data.id));
+          setDownloads(prev => prev.map(d => d.id === msg.data.id ? { ...d, status: 'done' } : d));
+          setTimeout(() => {
+            setDownloads(prev => prev.filter(d => d.id !== msg.data.id));
+          }, 3000);
         }
       };
       ws.onclose = () => { retryTimer = setTimeout(connect, 3000); };
