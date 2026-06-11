@@ -2,9 +2,10 @@
   "name": "deck-drop-plugin",
   "version": "1.0.0",
   "description": "Decky plugin for DeckDrop LAN game sharing",
+  "type": "module",
   "scripts": {
-    "build": "rollup -c --bundleConfigAsCjs",
-    "watch": "rollup -c --watch --bundleConfigAsCjs"
+    "build": "rollup -c",
+    "watch": "rollup -c -w"
   },
   "dependencies": {
     "@decky/api": "1.1.3",
