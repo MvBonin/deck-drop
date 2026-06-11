@@ -46,6 +46,12 @@ function App() {
 
   const ACTIVE_DL = new Set(['queued', 'downloading', 'verifying', 'paused', 'error', 'done']);
 
+  const isRealDownloadComplete = (data) => {
+    const total = data?.total_bytes ?? 0;
+    const downloaded = data?.downloaded_bytes ?? 0;
+    return total > 0 && downloaded >= total;
+  };
+
   const mergeDownload = useCallback((dl) => {
     if (!dl?.id || !ACTIVE_DL.has(dl.status)) return;
     setDownloads(prev => {
@@ -72,8 +78,14 @@ function App() {
         if (msg.event === 'download_progress') {
           mergeDownload(msg.data);
         }
-        if (msg.event === 'download_complete') {
-          setDownloads(prev => prev.map(d => d.id === msg.data.id ? { ...d, status: 'done' } : d));
+        if (msg.event === 'download_complete' && isRealDownloadComplete(msg.data)) {
+          setDownloads(prev => {
+            const dl = prev.find(d => d.id === msg.data.id);
+            if (!dl) return prev;
+            return prev.map(d => d.id === msg.data.id
+              ? { ...d, ...msg.data, status: 'done' }
+              : d);
+          });
           setTimeout(() => {
             setDownloads(prev => prev.filter(d => d.id !== msg.data.id));
           }, 3000);

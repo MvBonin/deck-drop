@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -135,7 +136,9 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
 
     try:
         try:
-            magnet = _fetch_magnet_from_peer(peer.address, peer.port, req.game_id)
+            magnet = await asyncio.to_thread(
+                _fetch_magnet_from_peer, peer.address, peer.port, req.game_id
+            )
             for g in peer.games:
                 if g["id"] == req.game_id:
                     g["has_torrent"] = True

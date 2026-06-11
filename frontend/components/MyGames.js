@@ -39,9 +39,12 @@ export function MyGames({ wsEvent, showToast }) {
 
   useEffect(() => { load(); }, []);
 
-  // Reload when a download completes
+  // Reload when a download truly completes (libtorrent finished + full bytes)
   useEffect(() => {
-    if (wsEvent?.event === 'download_complete') load();
+    if (wsEvent?.event !== 'download_complete') return;
+    const total = wsEvent.data?.total_bytes ?? 0;
+    const downloaded = wsEvent.data?.downloaded_bytes ?? 0;
+    if (total > 0 && downloaded >= total) load();
   }, [wsEvent]);
 
   useEffect(() => {

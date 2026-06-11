@@ -193,16 +193,10 @@ def _bytes_from_status(s: object) -> tuple[int, int, int]:
 def _bytes_complete(
     downloaded_bytes: int,
     total_bytes: int,
-    *,
-    pieces_missing: int = 0,
-    pieces_total: int = 0,
+    **_: object,
 ) -> bool:
-    if total_bytes > 0 and downloaded_bytes >= total_bytes:
-        return True
-    # All pieces received; byte counters can lag slightly behind.
-    if pieces_total > 0 and pieces_missing == 0:
-        return True
-    return False
+    """Byte-only completion check for persisted records without a live handle."""
+    return total_bytes > 0 and downloaded_bytes >= total_bytes
 
 
 def _pieces_from_status(s: object) -> tuple[int, int]:
@@ -215,7 +209,7 @@ def _pieces_from_status(s: object) -> tuple[int, int]:
     pieces = getattr(s, "pieces", None)
     if pieces is None:
         # libtorrent didn't populate pieces (status() without query_pieces flag).
-        # Treat as unknown – byte-based check in _bytes_complete still catches completion.
+        # Treat as unknown – used for UI only; completion uses _torrent_is_complete.
         return 0, 0
     try:
         if hasattr(pieces, "count"):
@@ -240,6 +234,15 @@ def _map_torrent_state(lt: object, state_int: int) -> str:
         int(ts.checking_resume_data): "checking",
     }
     return mapping.get(state_int, "downloading")
+
+
+def _torrent_is_complete(lt: object, s: object) -> bool:
+    """True only when libtorrent reports the torrent finished downloading."""
+    state = _map_torrent_state(lt, int(s.state))
+    if state not in ("done", "seeding"):
+        return False
+    downloaded, total, _ = _bytes_from_status(s)
+    return total > 0 and downloaded >= total
 
 
 def _progress_from_status(s: object) -> float:
@@ -740,15 +743,10 @@ class TransferManager:
             progress = _progress_from_status(s)
             downloaded_bytes, total_bytes, bytes_remaining = _bytes_from_status(s)
             pieces_total, pieces_missing = _pieces_from_status(s)
-            bytes_done = _bytes_complete(
-                downloaded_bytes,
-                total_bytes,
-                pieces_missing=pieces_missing,
-                pieces_total=pieces_total,
-            )
+            lt_complete = _torrent_is_complete(lt, s)
 
             if status_str == "checking":
-                status_str = "verifying" if bytes_done else "queued"
+                status_str = "verifying" if lt_complete else "queued"
 
             lt_error = str(getattr(s, "error", "") or "").strip()
             if not lt_error:
@@ -774,9 +772,9 @@ class TransferManager:
                 status_str = "error"
                 err = rec.error
                 hint = _transfer_error_hint(err)
-            elif bytes_done and status_str not in ("seeding",):
+            elif lt_complete and status_str in ("done", "seeding"):
                 status_str = "done"
-            elif status_str == "done" and not bytes_done:
+            elif status_str in ("done", "seeding") and not lt_complete:
                 status_str = "downloading"
 
             out = DownloadStatus(
@@ -1016,6 +1014,8 @@ class TransferManager:
                 "game_id": status.game_id,
                 "game_name": status.game_name,
                 "peer_name": h.peer_name,
+                "downloaded_bytes": status.downloaded_bytes,
+                "total_bytes": status.total_bytes,
             },
         )
         if self._library:
@@ -1036,15 +1036,8 @@ class TransferManager:
                         continue
                 status = self._build_status(h)
 
-                bytes_done = _bytes_complete(
-                    status.downloaded_bytes,
-                    status.total_bytes,
-                    pieces_missing=status.pieces_missing,
-                    pieces_total=status.pieces_total,
-                )
-                # Only trust byte-level confirmation; libtorrent can report "seeding"
-                # before data is actually transferred (e.g. when metadata is missing).
-                is_complete = bytes_done
+                lt = _lt()
+                is_complete = _torrent_is_complete(lt, h.handle.status())
 
                 if is_complete and status.status != "error":
                     await self._finalize_download(h, status)

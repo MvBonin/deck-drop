@@ -7,6 +7,7 @@ from deckdrop.network.transfer import (
     _friendly_transfer_error,
     _map_torrent_state,
     _pieces_from_status,
+    _torrent_is_complete,
     _transfer_error_hint,
 )
 
@@ -15,8 +16,41 @@ def test_bytes_complete():
     assert _bytes_complete(100, 100) is True
     assert _bytes_complete(99, 100) is False
     assert _bytes_complete(0, 0) is False
-    assert _bytes_complete(90, 100, pieces_missing=0, pieces_total=50) is True
-    assert _bytes_complete(90, 100, pieces_missing=1, pieces_total=50) is False
+    # Piece kwargs are ignored – byte-only check.
+    assert _bytes_complete(90, 100, pieces_missing=0, pieces_total=50) is False
+    assert _bytes_complete(0, 0, pieces_missing=0, pieces_total=50) is False
+
+
+def test_torrent_is_complete():
+    lt = MagicMock()
+    ts = lt.torrent_status
+    ts.downloading = 3
+    ts.finished = 4
+    ts.seeding = 5
+
+    def status(state, downloaded, total):
+        s = MagicMock()
+        s.state = state
+        s.total_wanted = total
+        s.total_done = downloaded
+        s.total_wanted_done = downloaded
+        s.progress = downloaded / total if total else 0.0
+        return s
+
+    # downloading + full bytes → not complete (state matters)
+    assert _torrent_is_complete(lt, status(ts.downloading, 100, 100)) is False
+
+    # finished + full bytes → complete
+    assert _torrent_is_complete(lt, status(ts.finished, 100, 100)) is True
+
+    # finished + 0 bytes → not complete
+    assert _torrent_is_complete(lt, status(ts.finished, 0, 1_000_000)) is False
+
+    # seeding + full bytes → complete
+    assert _torrent_is_complete(lt, status(ts.seeding, 500, 500)) is True
+
+    # finished + partial bytes → not complete
+    assert _torrent_is_complete(lt, status(ts.finished, 90, 100)) is False
 
 
 def test_transfer_error_hint_hash():
