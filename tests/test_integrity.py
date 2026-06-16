@@ -28,6 +28,14 @@ def test_hash_directory_excludes_toml(tmp_path):
     assert "deckdrop.toml" not in hashes
 
 
+def test_hash_directory_excludes_cover_files(tmp_path):
+    (tmp_path / "game.exe").write_bytes(b"x" * 100)
+    (tmp_path / "deckdrop.jpg").write_bytes(b"cover")
+    hashes, _ = hash_directory(tmp_path)
+    assert "deckdrop.jpg" not in hashes
+    assert "game.exe" in hashes
+
+
 def test_verify_files_passes(tmp_path):
     (tmp_path / "file.txt").write_text("content")
     hashes, _ = hash_directory(tmp_path)

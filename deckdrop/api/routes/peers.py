@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from deckdrop.api import state as app_state
@@ -15,6 +16,7 @@ from deckdrop.api.routes.games import CommentOut
 router = APIRouter(tags=["peers"], dependencies=[Depends(local_only)])
 
 _PEER_COMMENT_TIMEOUT = 3.0
+_PEER_COVER_TIMEOUT = 5.0
 
 
 def _peer_http_url(address: str, port: int, path: str) -> str:
@@ -90,3 +92,27 @@ def get_peer_game_comments(peer_id: str, game_id: str) -> list[CommentOut]:
         ) from exc
     except Exception as exc:
         raise HTTPException(502, f"Kommentare vom Peer nicht abrufbar: {exc}") from exc
+
+
+@router.get("/peers/{peer_id}/games/{game_id}/cover")
+def get_peer_game_cover(peer_id: str, game_id: str) -> Response:
+    """Proxy a game cover image from a remote peer (read-only for Network view)."""
+    registry = app_state.get().peer_registry
+    entry = registry.get(peer_id)
+    if not entry or not entry.online:
+        raise HTTPException(404, "Peer nicht gefunden")
+    if not any(g.get("id") == game_id for g in entry.games):
+        raise HTTPException(404, "Spiel beim Peer nicht gefunden")
+
+    url = _peer_http_url(entry.address, entry.port, f"/api/games/{game_id}/cover")
+    try:
+        r = httpx.get(url, timeout=_PEER_COVER_TIMEOUT)
+        r.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code if exc.response is not None else 502
+        raise HTTPException(404 if status == 404 else 502, "Kein Cover beim Peer") from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Cover vom Peer nicht abrufbar: {exc}") from exc
+
+    media_type = r.headers.get("content-type", "image/jpeg")
+    return Response(content=r.content, media_type=media_type)

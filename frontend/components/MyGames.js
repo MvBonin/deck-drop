@@ -112,6 +112,11 @@ export function MyGames({ wsEvent, showToast }) {
     showToast(`„${updated.name}" gespeichert`);
   };
 
+  const onGameUpdated = (updated) => {
+    setGames(gs => gs.map(g => g.id === updated.id ? updated : g));
+    setEditGame(eg => (eg?.id === updated.id ? updated : eg));
+  };
+
   return html`
     <div class="view">
       <div class="view-header">
@@ -152,7 +157,7 @@ export function MyGames({ wsEvent, showToast }) {
       >+</button>
 
       ${showAdd && html`<${AddGame} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
-      ${editGame && html`<${EditGame} game=${editGame} onClose=${() => setEditGame(null)} onSaved=${onSaved} />`}
+      ${editGame && html`<${EditGame} game=${editGame} onClose=${() => setEditGame(null)} onSaved=${onSaved} onGameUpdated=${onGameUpdated} />`}
       ${commentsGame && html`<${Comments} game=${commentsGame} onClose=${() => setCommentsGame(null)} />`}
     </div>`;
 }

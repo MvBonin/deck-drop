@@ -24,6 +24,7 @@ from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
 from deckdrop.core import game as game_mod
 from deckdrop.core import integrity, torrent_prep
+from deckdrop.core.cover import COVER_FILENAMES, clear_covers, download_steam_cover, has_local_cover
 from deckdrop.core.comments import (
     Comment,
     load_comments,
@@ -36,9 +37,6 @@ from deckdrop.core.game import GameInfo
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["games"])
-
-COVER_FILENAMES = ("deckdrop.png", "deckdrop.jpg", "deckdrop.jpeg", "deckdrop.webp")
-
 
 # -- Pydantic schemas --
 
@@ -86,7 +84,7 @@ class GameOut(BaseModel):
             prep_progress = torrent_prep.get_progress(g.id)
             if prep_progress is None:
                 prep_progress = 0.0
-        has_local_cover = any((g.path / name).is_file() for name in COVER_FILENAMES)
+        local_cover = has_local_cover(g.path)
         return cls(
             id=g.id,
             name=g.name,
@@ -98,7 +96,7 @@ class GameOut(BaseModel):
             updated_at=g.updated_at,
             steam_app_id=g.steam.app_id,
             has_torrent=has_torrent,
-            has_local_cover=has_local_cover,
+            has_local_cover=local_cover,
             info_hash=g.torrent.info_hash or None,
             source_peer_name=g.origin.peer_name or None,
             torrent_preparing=preparing,
@@ -205,6 +203,9 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
 
     s.library.add(info)
 
+    if info.steam.app_id:
+        download_steam_cover(info.path, info.steam.app_id)
+
     # Start torrent/magnet prep immediately (must not wait behind integrity hashing).
     torrent_prep.schedule_prepare(info.id)
     # Blake2b file hashes for deckdrop.toml — slow on large games, runs in parallel.
@@ -228,8 +229,16 @@ def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
         g.platform = req.platform
         changed = True
     if "steam_app_id" in req.model_fields_set:
-        g.steam.app_id = req.steam_app_id
-        changed = True
+        new_id = req.steam_app_id
+        id_changed = new_id != g.steam.app_id
+        if id_changed:
+            g.steam.app_id = new_id
+            changed = True
+        if new_id:
+            if id_changed or not has_local_cover(g.path):
+                download_steam_cover(g.path, new_id)
+        elif id_changed:
+            clear_covers(g.path)
     if req.description is not None:
         g.description = req.description
         changed = True
@@ -328,10 +337,11 @@ async def search_cover(game_id: str) -> dict[str, int]:
 
     app_id: int = items[0]["id"]
     g.steam.app_id = app_id
+    cover_downloaded = download_steam_cover(g.path, app_id)
     game_mod.bump_version(g, s.cfg.user_name)
     game_mod.save(g)
     log.info("Auto-assigned steam_app_id=%d to game %s via search", app_id, game_id)
-    return {"steam_app_id": app_id}
+    return {"steam_app_id": app_id, "cover_downloaded": cover_downloaded}
 
 
 @router.get("/games/{game_id}/magnet")

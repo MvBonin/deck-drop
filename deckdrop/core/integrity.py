@@ -8,8 +8,10 @@ from pathlib import Path
 
 CHUNK_SIZE = 1024 * 1024  # 1 MB
 
-# Not part of the BitTorrent payload (local metadata; may change after torrent creation).
-TORRENT_SKIP_FILENAMES = frozenset({"deckdrop.toml", "comments.toml"})
+from deckdrop.core.cover import COVER_FILENAMES
+
+# Local metadata / UI assets — never part of the BitTorrent payload.
+TORRENT_SKIP_FILENAMES = frozenset({"deckdrop.toml", "comments.toml", *COVER_FILENAMES})
 
 
 def should_include_in_torrent(path: Path) -> bool:
@@ -25,7 +27,7 @@ def dir_size(root: Path) -> int:
     """Total bytes of all files under root (fast; no hashing)."""
     total = 0
     for path in root.rglob("*"):
-        if path.is_file() and path.name != "deckdrop.toml":
+        if path.is_file() and path.name not in TORRENT_SKIP_FILENAMES:
             total += path.stat().st_size
     return total
 
@@ -54,7 +56,9 @@ def hash_directory(
     results: dict[str, str] = {}
     total_bytes = 0
 
-    files = sorted(p for p in root.rglob("*") if p.is_file() and p.name != "deckdrop.toml")
+    files = sorted(
+        p for p in root.rglob("*") if p.is_file() and p.name not in TORRENT_SKIP_FILENAMES
+    )
 
     for file_path in files:
         rel = file_path.relative_to(root).as_posix()

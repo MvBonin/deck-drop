@@ -2,17 +2,20 @@ import { html } from 'htm/preact';
 import { useState } from 'preact/hooks';
 import { fmtBytes } from '../api.js';
 
-const PLACEHOLDER_STYLE = 'display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:52px;font-weight:800;color:var(--accent)';
+const PLACEHOLDER_STYLE = 'display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:52px;font-weight:800;color:var(--accent);pointer-events:none';
 
-function CoverImage({ game }) {
+function CoverImage({ game, mode = 'own' }) {
   const initial = (game.name || '?')[0].toUpperCase();
   const [steamFailed, setSteamFailed] = useState(false);
 
   if (game.has_local_cover) {
+    const coverSrc = mode === 'network' && game.peer_id
+      ? `/api/peers/${game.peer_id}/games/${game.id}/cover`
+      : `/api/games/${game.id}/cover`;
     return html`
       <div class="card-cover">
         <img
-          src="/api/games/${game.id}/cover"
+          src=${coverSrc}
           alt=${game.name}
           onError=${e => { e.target.style.display='none'; e.target.parentNode.querySelector('.placeholder-text').style.display='flex'; }}
         />
@@ -69,7 +72,7 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
       role="article"
       aria-label=${game.name}
     >
-      <${CoverImage} game=${game} />
+      <${CoverImage} game=${game} mode=${mode} />
       <div class="card-body">
         <div class="card-name">${game.name}</div>
         <div class="card-meta">

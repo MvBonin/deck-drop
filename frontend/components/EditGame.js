@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 
-export function EditGame({ game, onClose, onSaved }) {
+export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
   const [name, setName]             = useState(game.name || '');
   const [platform, setPlatform]     = useState(game.platform || 'any');
   const [appId, setAppId]           = useState(game.steam_app_id ? String(game.steam_app_id) : '');
@@ -30,6 +30,12 @@ export function EditGame({ game, onClose, onSaved }) {
     try {
       const res = await api.searchCover(game.id);
       setAppId(String(res.steam_app_id));
+      if (res.cover_downloaded) {
+        const updated = await api.getGame(game.id);
+        onGameUpdated?.(updated);
+      } else {
+        setError('App-ID gefunden, aber kein Steam-Cover verfügbar');
+      }
     } catch (err) {
       setError('Keine Cover Art auf Steam gefunden');
     } finally {
@@ -92,29 +98,29 @@ export function EditGame({ game, onClose, onSaved }) {
 
           <div class="form-group">
             <label class="form-label">Steam App-ID (optional, für Cover)</label>
-            <div style="display:flex;gap:8px;align-items:center">
-              <input
-                class="form-input"
-                type="number"
-                placeholder="413150"
-                value=${appId}
-                onInput=${e => setAppId(e.target.value)}
-                disabled=${loading || searching}
-                style="flex:1"
-              />
-              <button
-                type="button"
-                class="btn btn-ghost"
-                style="white-space:nowrap;padding:8px 12px;font-size:13px"
-                onClick=${searchCover}
-                disabled=${loading || searching}
-                title="Automatisch auf Steam suchen"
-              >
-                ${searching ? html`<span class="spinner"></span>` : '🔍 Suchen'}
-              </button>
-            </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:4px">
-              Oder <code>deckdrop.png</code> direkt in den Spielordner legen.
+            <input
+              class="form-input"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="413150"
+              value=${appId}
+              onInput=${e => setAppId(e.target.value.replace(/\D/g, ''))}
+              disabled=${loading || searching}
+            />
+            <button
+              type="button"
+              class="btn btn-ghost"
+              style="align-self:flex-start;padding:8px 14px;font-size:13px"
+              onClick=${searchCover}
+              disabled=${loading || searching}
+              title="Spielname auf Steam durchsuchen und erste Treffer-App-ID übernehmen"
+            >
+              ${searching ? html`<span class="spinner"></span>` : '🔍 Auf Steam suchen'}
+            </button>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45">
+              „Suchen“ oder Speichern mit App-ID lädt das Cover von Steam als
+              <code>deckdrop.jpg</code> in den Spielordner (ohne Torrent neu zu bauen).
             </div>
           </div>
 

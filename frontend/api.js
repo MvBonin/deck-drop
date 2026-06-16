@@ -24,6 +24,7 @@ const del  = (path)        => req('DELETE', path);
 export const api = {
   status:       ()          => get('/api/status'),
   games:        ()          => get('/api/games'),
+  getGame:      (id)        => get(`/api/games/${id}`),
   addGame:      (body)      => post('/api/games', body),
   patchGame:    (id, body)  => patch(`/api/games/${id}`, body),
   removeGame:   (id)        => del(`/api/games/${id}`),

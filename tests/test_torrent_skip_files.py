@@ -15,6 +15,8 @@ from deckdrop.core.integrity import (
 def test_torrent_skip_filenames():
     assert "deckdrop.toml" in TORRENT_SKIP_FILENAMES
     assert "comments.toml" in TORRENT_SKIP_FILENAMES
+    assert "deckdrop.png" in TORRENT_SKIP_FILENAMES
+    assert "deckdrop.jpg" in TORRENT_SKIP_FILENAMES
 
 
 def test_iter_torrent_files_excludes_metadata(tmp_path):
@@ -23,12 +25,14 @@ def test_iter_torrent_files_excludes_metadata(tmp_path):
     (game / "data.bin").write_bytes(b"x" * 10)
     (game / "deckdrop.toml").write_text("id = 'x'\n", encoding="utf-8")
     (game / "comments.toml").write_text("[[comment]]\n", encoding="utf-8")
+    (game / "deckdrop.jpg").write_bytes(b"cover")
 
     files = iter_torrent_files(game)
     assert len(files) == 1
     assert files[0].name == "data.bin"
     assert should_include_in_torrent(game / "data.bin")
     assert not should_include_in_torrent(game / "deckdrop.toml")
+    assert not should_include_in_torrent(game / "deckdrop.jpg")
 
 
 def test_invalidate_torrent_clears_cache_and_schedules_reprepare(tmp_path, monkeypatch):
