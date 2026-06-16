@@ -692,6 +692,20 @@ class TransferManager:
                 result.append(self._paused_status(rec))
         return [s for s in result if s.status in _ACTIVE_DOWNLOAD_STATUSES]
 
+    def _remote_peer_game(self, h: _Handle) -> tuple[object | None, dict | None]:
+        """Return (peer, remote_game_dict) for this download's source, if known."""
+        from deckdrop.api import state as app_state
+
+        try:
+            s = app_state.get()
+        except RuntimeError:
+            return None, None
+        peer = s.peer_registry.get(h.peer_id)
+        if not peer:
+            return None, None
+        remote_game = next((g for g in peer.games if g.get("id") == h.game_id), None)
+        return peer, remote_game
+
     def _register_downloaded_game(self, h: _Handle) -> None:
         """Write deckdrop.toml with origin peer so My Games shows the source."""
         from deckdrop.core import game as game_mod
@@ -700,15 +714,36 @@ class TransferManager:
         dest = h.dest_path
         if not dest.is_dir():
             return
+
+        _peer, remote_game = self._remote_peer_game(h)
+        steam_app_id: int | None = None
+        if remote_game:
+            try:
+                raw_id = remote_game.get("steam_app_id")
+                steam_app_id = int(raw_id) if raw_id else None
+            except (TypeError, ValueError):
+                steam_app_id = None
+
         try:
             info = game_mod.load_from_path(dest)
             if info:
+                changed = False
                 if not info.origin.peer_name:
                     info.origin.peer_id = h.peer_id
                     info.origin.peer_name = h.peer_name
+                    changed = True
+                if steam_app_id and not info.steam.app_id:
+                    info.steam.app_id = steam_app_id
+                    changed = True
+                if changed:
                     game_mod.save(info)
             else:
-                info = game_mod.create_new(dest, h.game_name, added_by=self._cfg.user_name)
+                info = game_mod.create_new(
+                    dest,
+                    h.game_name,
+                    added_by=self._cfg.user_name,
+                    steam_app_id=steam_app_id,
+                )
                 info.origin.peer_id = h.peer_id
                 info.origin.peer_name = h.peer_name
                 info.size_bytes = integrity.dir_size(dest)
@@ -716,6 +751,31 @@ class TransferManager:
             log.info("Registered download at %s (from %s)", dest, h.peer_name)
         except Exception as exc:
             log.warning("Could not register downloaded game at %s: %s", dest, exc)
+
+    def _fetch_and_save_cover(self, h: _Handle) -> None:
+        """
+        Persist the game cover locally so it survives the host going offline.
+
+        Covers are excluded from the torrent, so a freshly downloaded game has
+        no cover file yet. We fetch it from the host's cover endpoint (best
+        effort) and fall back to nothing if the host has no cover.
+        """
+        from deckdrop.core import cover
+
+        dest = h.dest_path
+        if not dest.is_dir() or cover.has_local_cover(dest):
+            return
+
+        peer, remote_game = self._remote_peer_game(h)
+        if peer is None:
+            return
+        # Skip the request when we positively know the host has no cover file.
+        if remote_game is not None and not remote_game.get("has_local_cover"):
+            return
+
+        url = _peer_http_url(peer.address, peer.port, f"/api/games/{h.game_id}/cover")
+        if cover.download_cover_from_url(dest, url):
+            log.info("Saved cover for downloaded game %s (from %s)", h.game_name, h.peer_name)
 
     def shutdown(self) -> None:
         if self._poll_task:
@@ -1060,6 +1120,10 @@ class TransferManager:
             return
         self._completed_ids.add(status.id)
         self._register_downloaded_game(h)
+        try:
+            await asyncio.to_thread(self._fetch_and_save_cover, h)
+        except Exception as exc:
+            log.debug("Cover fetch failed for %s: %s", h.game_name, exc)
         await broadcast(
             "download_complete",
             {
