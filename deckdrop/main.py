@@ -165,11 +165,12 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
             if not g.torrent.magnet and not torrent_prep.has_cached_torrent(cfg, g.id):
                 torrent_prep.schedule_prepare(g.id)
         yield
-        # Shutdown
+        # Shutdown – transfers first: writing fast-resume data must happen
+        # before the single-instance grace period runs out.
         peer_registry.stop_refresh_loop()
-        await discovery.stop()
         if transfer:
             transfer.shutdown()
+        await discovery.stop()
 
     app = create_app(lifespan=lifespan)
 

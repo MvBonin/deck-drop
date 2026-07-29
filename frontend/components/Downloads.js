@@ -25,6 +25,23 @@ const ACTIVE_DOWNLOAD_STATUSES = new Set([
   'queued', 'downloading', 'verifying', 'paused', 'error', 'done',
 ]);
 
+/**
+ * Label for a row. `status` is coarse ("Wartend" covers both waiting for the
+ * host and re-checking existing files), so prefer the detailed phase – a long
+ * file check used to look like a frozen download.
+ */
+function statusLabel(dl) {
+  if (dl.status === 'queued' || dl.status === 'downloading') {
+    if (dl.phase === 'checking') {
+      const pct = Math.round((dl.phase_progress || 0) * 100);
+      return `🔍 Prüfe vorhandene Dateien ${pct} %`;
+    }
+    if (dl.phase === 'metadata') return '⏳ Warte auf Metadaten vom Host…';
+    if (dl.num_peers === 0) return '⏳ Verbinde mit Host…';
+  }
+  return STATUS_LABEL[dl.status] || dl.status;
+}
+
 /** Progress 0–100 as float (not rounded). */
 function progressPct(dl) {
   if (dl.total_bytes > 0) {
@@ -59,7 +76,10 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
   const fillClass = dl.status === 'done' || dl.status === 'seeding' ? 'done'
                   : dl.status === 'error' ? 'error'
                   : dl.status === 'paused' ? '' : '';
-  const statusColor = STATUS_COLOR[dl.status] || 'var(--text-dim)';
+  const checking = dl.phase === 'checking';
+  const statusColor = checking
+    ? 'var(--accent)'
+    : STATUS_COLOR[dl.status] || 'var(--text-dim)';
   const canPause = dl.status === 'downloading' || dl.status === 'queued';
   const canResume = dl.status === 'paused';
   const canRetry = dl.status === 'error';
@@ -78,7 +98,7 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
             : `von ${dl.peer_name}`}</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
-          <span style="font-size:13px;font-weight:600;color:${statusColor}">${STATUS_LABEL[dl.status] || dl.status}</span>
+          <span style="font-size:13px;font-weight:600;color:${statusColor}">${statusLabel(dl)}</span>
           ${canPause && html`
             <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onClick=${() => onPause(dl)}>Pause</button>
           `}
@@ -115,9 +135,17 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
         `}
         ${dl.total_bytes > 0
           ? html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`
-          : (dl.status === 'queued' || dl.status === 'downloading')
-            ? html`<span style="color:var(--text-dim)">${dl.num_peers > 0 ? 'Metadaten werden geladen…' : 'Verbinde mit Host…'}</span>`
-            : html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`}
+          : dl.downloaded_bytes > 0
+            ? html`<span>${fmtBytes(dl.downloaded_bytes)} geladen</span>`
+            : (dl.status === 'queued' || dl.status === 'downloading')
+              ? html`<span style="color:var(--text-dim)">${dl.num_peers > 0 ? 'Metadaten werden geladen…' : 'Verbinde mit Host…'}</span>`
+              : html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`}
+        ${checking && html`
+          <span style="color:var(--text-dim);font-size:12px">Vorhandene Dateien werden geprüft – es wird nichts neu geladen.</span>
+        `}
+        ${dl.phase === 'downloading' && dl.stall_seconds > 20 && html`
+          <span style="color:var(--text-dim);font-size:12px">Keine Daten seit ${dl.stall_seconds} s – Host-Verbindung wird erneuert…</span>
+        `}
         ${sprint && html`<span style="color:var(--accent)">${sprint}</span>`}
         ${pct >= 99.5 && dl.bytes_remaining > 0 && (dl.status === 'downloading' || dl.status === 'verifying') && html`
           <span style="color:var(--text-dim);font-size:12px">Host-Verbindung wird erneuert…</span>

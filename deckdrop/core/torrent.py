@@ -98,11 +98,18 @@ def make_magnet(torrent_data: bytes) -> tuple[str, str]:
 
 def lan_session(torrent_port: int) -> object:
     """Return a new libtorrent session configured for LAN-only operation."""
+    from deckdrop.network import resume
+
     lt = _lt()
     listen = f"0.0.0.0:{torrent_port}"
     settings = dict(_LAN_SETTINGS_CORE)
     settings.update(_LAN_SETTINGS_OPTIONAL)
     settings["listen_interfaces"] = listen
+    # Needed for save_resume_data / metadata alerts; optional so odd builds
+    # still fall back to the core settings below.
+    mask = resume.alert_mask(lt)
+    if mask:
+        settings["alert_mask"] = mask
     try:
         return lt.session(settings)
     except (KeyError, TypeError) as exc:

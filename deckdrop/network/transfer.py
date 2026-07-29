@@ -18,6 +18,7 @@ from pathlib import Path
 
 from deckdrop.api.websocket import broadcast
 from deckdrop.core.config import Config
+from deckdrop.network import resume as resume_mod
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,11 @@ class DownloadStatus:
     error: str | None = None
     error_hint: str | None = None
     dest_path: str | None = None
+    # What libtorrent is really doing – `status` keeps its coarse vocabulary so
+    # existing filters stay valid, `phase` carries the detail for the UI.
+    phase: str = "queued"  # metadata | checking | verifying | downloading | queued | done
+    phase_progress: float = 0.0  # 0.0–1.0, meaningful while checking files
+    stall_seconds: int = 0  # seconds since the last byte of progress
 
 
 @dataclass
@@ -72,6 +78,14 @@ class _PersistedRecord:
     downloaded_bytes: int = 0
     total_bytes: int = 0
     info_hash: str = ""
+    has_resume_data: bool = False
+    resume_saved_at: float = 0.0
+    last_progress_at: float = 0.0
+    error_at: float = 0.0
+    # Stall/metadata heuristics may be wrong (host briefly offline) – those
+    # errors clear themselves and never pause the torrent.
+    error_recoverable: bool = False
+    restore_attempts: int = 0
 
 
 _MAGNET_CHECK_INTERVAL = 15.0
@@ -130,6 +144,9 @@ _TRANSFER_ERROR_PATTERNS: list[tuple[str, str]] = [
 ]
 
 _TRANSFER_ERROR_HINTS: list[tuple[str, str]] = [
+    ("keine verbindung zum host", "Host einschalten, DeckDrop dort starten, Port 7374 freigeben."),
+    ("liefert keine torrent-daten", "Am Host das Spiel neu freigeben, dann „Erneut“."),
+    ("keine daten vom host", "Host online lassen; der Download verbindet sich selbst neu."),
     ("hash", "Erneut versuchen; Host-Dateien prüfen."),
     ("piece", "Erneut versuchen; Host-Dateien prüfen."),
     ("no space", "Speicherplatz freigeben, dann „Erneut“."),
@@ -183,6 +200,19 @@ _STALL_REMAINING_MAX = 5 * 1024 * 1024  # only nudge when < 5 MiB left
 # Metadata phase (no torrent info yet, e.g. restored magnet after a restart):
 # DHT/trackers are LAN-only, so reconnect to the known host to fetch metadata fast.
 _METADATA_NUDGE_INTERVAL = 5.0
+_METADATA_ERROR_AFTER = 180.0
+
+# Peer reconnects apply in every phase, not just the endgame.
+_NO_PEER_NUDGE_INTERVAL = 5.0
+_NO_PEER_REANNOUNCE_INTERVAL = 30.0
+_MIDSTALL_ERROR_AFTER = 300.0
+
+# Fast resume: how often a running download writes its resume blob, and how
+# long shutdown waits for libtorrent to hand the blobs over. The shutdown
+# budget must stay well inside single_instance._GRACE_SEC.
+_RESUME_SAVE_INTERVAL = 60.0
+_SHUTDOWN_RESUME_BUDGET = 1.5
+_STATE_SAVE_INTERVAL = 5.0
 
 
 def _bytes_from_status(s: object) -> tuple[int, int, int]:
@@ -272,6 +302,21 @@ def _torrent_status(handle: object) -> object:
     return handle.status()
 
 
+def _phase_from_state(raw_state: str, total_bytes: int, is_complete: bool) -> str:
+    """Detailed phase behind the coarse `status` value.
+
+    `status` collapses libtorrent's checking states onto queued/verifying, which
+    made a multi-minute re-hash look like a frozen "waiting" row.
+    """
+    if raw_state == "checking":
+        return "verifying" if is_complete else "checking"
+    if raw_state in ("done", "seeding"):
+        return "done"
+    if raw_state == "queued" and total_bytes <= 0:
+        return "metadata"
+    return raw_state
+
+
 def _progress_from_status(s: object) -> float:
     """Prefer byte ratio; libtorrent's progress can lag or jump."""
     downloaded, total, _ = _bytes_from_status(s)
@@ -301,6 +346,13 @@ class TransferManager:
         self._recheck_done: set[str] = set()
         self._last_magnet_check_at: dict[str, float] = {}
         self._pending_download_dests: set[Path] = set()
+        self._resume_store = resume_mod.ResumeStore(cfg.resume_dir)
+        self._by_info_hash: dict[str, str] = {}  # info_hash → download_id
+        self._pending_resume: dict[str, float] = {}  # download_id → requested at
+        self._last_resume_save_at: dict[str, float] = {}
+        self._meta_wait_since: dict[str, float] = {}
+        self._last_state_save_at = 0.0
+        self._shutdown_done = False
         if cfg.max_upload_speed or cfg.max_download_speed:
             self.apply_rate_limits()
         self._load_state()
@@ -338,16 +390,56 @@ class TransferManager:
             if rec.user_paused or rec.download_id in self._user_paused:
                 continue
             if rec.error:
-                continue
+                # A stale error from the last session (host was briefly away)
+                # must not mean "do nothing today" – give it one clean shot.
+                if rec.restore_attempts >= 1:
+                    continue
+                rec.restore_attempts += 1
+                rec.error = None
+                rec.error_recoverable = False
+                log.info("Retrying download %s after stale error", rec.download_id)
             if rec.download_id in self._handles:
                 continue
             if rec.total_bytes > 0 and rec.downloaded_bytes >= rec.total_bytes:
                 continue
+            self._peer_address_for(rec)
             if self._reattach_download(rec):
                 restored += 1
         if restored:
             log.info("Restored %d download(s) after restart", restored)
         return restored
+
+    def _registry_peer_address(self, peer_id: str) -> str:
+        """Current address of a peer from the registry ('' when unknown)."""
+        from deckdrop.api import state as app_state
+
+        try:
+            s = app_state.get()
+        except RuntimeError:
+            return ""
+        registry = getattr(s, "peer_registry", None)
+        if registry is None:
+            return ""
+        try:
+            peer = registry.get(peer_id)
+        except Exception:  # pragma: no cover - defensive
+            return ""
+        if not peer or not getattr(peer, "online", True):
+            return ""
+        return getattr(peer, "address", "") or ""
+
+    def _peer_address_for(self, rec: _PersistedRecord) -> str:
+        """Live registry address wins over the stored one (DHCP changes)."""
+        current = self._registry_peer_address(rec.peer_id)
+        if current and current != rec.peer_address:
+            log.info(
+                "Peer %s address changed %s → %s",
+                rec.peer_name or rec.peer_id,
+                rec.peer_address or "?",
+                current,
+            )
+            rec.peer_address = current
+        return rec.peer_address
 
     def update_peer_address(self, peer_id: str, address: str) -> None:
         """Keep torrent peer connections in sync when mDNS reports a new IP."""
@@ -446,7 +538,20 @@ class TransferManager:
         # Torrent paths are e.g. "GameName/file.bin" – save_path must be the parent dir.
         save_path = dest_path.parent
         save_path.mkdir(parents=True, exist_ok=True)
-        params = _parse_magnet_params(lt, magnet, str(save_path))
+        info_hash = _info_hash_from_magnet(magnet)
+        rec = _PersistedRecord(
+            download_id=download_id,
+            game_id=game_id,
+            game_name=game_name,
+            peer_id=peer_id,
+            peer_name=peer_name,
+            magnet=magnet,
+            dest_path=str(dest_path),
+            started_at=time.time(),
+            peer_address=peer_address,
+            info_hash=info_hash,
+        )
+        params, source = self._params_for_record(lt, rec, save_path)
         handle = self._session.add_torrent(params)
 
         # Directly connect to the peer who has the game – no waiting for LSD
@@ -462,23 +567,176 @@ class TransferManager:
             handle=handle,
             dest_path=dest_path,
         )
-        info_hash = _info_hash_from_magnet(magnet)
-        self._paused[download_id] = _PersistedRecord(
-            download_id=download_id,
-            game_id=game_id,
-            game_name=game_name,
-            peer_id=peer_id,
-            peer_name=peer_name,
-            magnet=magnet,
-            dest_path=str(dest_path),
-            started_at=time.time(),
-            peer_address=peer_address,
-            info_hash=info_hash,
-        )
+        self._paused[download_id] = rec
+        if info_hash:
+            self._by_info_hash[info_hash] = download_id
         self._user_paused.discard(download_id)
         self._save_state()
-        log.info("Download started: %s (%s) from %s", game_name, download_id, peer_address)
+        log.info(
+            "Download started: %s (%s) from %s via %s",
+            game_name,
+            download_id,
+            peer_address,
+            source,
+        )
         return download_id
+
+    # -- Fast resume --
+
+    def _params_for_record(
+        self,
+        lt: object,
+        rec: _PersistedRecord,
+        save_path: Path,
+    ) -> tuple[object, str]:
+        """add_torrent_params for a record: resume blob > .torrent > magnet.
+
+        The resume blob carries the piece bitmap *and* (thanks to
+        save_info_dict) the metadata, so a restart neither waits for the host
+        nor re-hashes what is already on disk.
+        """
+        target = str(save_path)
+
+        blob = self._resume_store.load_resume(rec.download_id, rec.info_hash)
+        if blob:
+            params = resume_mod.decode_resume_params(lt, blob, target)
+            if params is not None:
+                return params, "resume"
+            self._resume_store.drop_resume(rec.download_id, rec.info_hash)
+
+        cached = self._resume_store.find_metadata(rec.download_id, rec.info_hash)
+        if cached is not None:
+            params = resume_mod.params_from_torrent_file(lt, cached, target, rec.info_hash)
+            if params is not None:
+                return params, "torrent"
+
+        shared = self._cfg.torrent_cache / f"{rec.game_id}.torrent"
+        if rec.info_hash and shared.is_file():
+            params = resume_mod.params_from_torrent_file(lt, shared, target, rec.info_hash)
+            if params is not None:
+                return params, "cache"
+
+        return _parse_magnet_params(lt, rec.magnet, target), "magnet"
+
+    def _download_id_for_handle(self, handle: object) -> str | None:
+        for did, h in self._handles.items():
+            if h.handle is handle:
+                return did
+        for did, h in self._handles.items():
+            try:
+                if h.handle == handle:
+                    return did
+            except Exception:  # pragma: no cover - defensive
+                continue
+        try:
+            info_hash = str(handle.info_hash()).lower()  # type: ignore[attr-defined]
+        except Exception:
+            return None
+        return self._by_info_hash.get(info_hash)
+
+    def _request_resume_save(self, h: _Handle, *, force: bool = False) -> bool:
+        """Ask libtorrent for a resume blob; the alert pump persists it."""
+        lt = _lt()
+        handle = h.handle
+        if not force:
+            needs = getattr(handle, "need_save_resume_data", None)
+            if needs is not None:
+                try:
+                    if not needs():
+                        return False
+                except Exception:  # pragma: no cover - defensive
+                    pass
+        flags = resume_mod.resume_flags(lt)
+        try:
+            if flags:
+                handle.save_resume_data(flags)
+            else:
+                handle.save_resume_data()
+        except TypeError:
+            try:
+                handle.save_resume_data()
+            except Exception as exc:
+                log.debug("save_resume_data failed for %s: %s", h.download_id, exc)
+                return False
+        except Exception as exc:
+            log.debug("save_resume_data failed for %s: %s", h.download_id, exc)
+            return False
+        self._pending_resume[h.download_id] = time.monotonic()
+        self._last_resume_save_at[h.download_id] = time.monotonic()
+        return True
+
+    def _maybe_save_resume(self, h: _Handle, status: DownloadStatus) -> None:
+        if status.status in ("error", "paused") or status.total_bytes <= 0:
+            return
+        now = time.monotonic()
+        if now - self._last_resume_save_at.get(h.download_id, 0.0) < _RESUME_SAVE_INTERVAL:
+            return
+        self._request_resume_save(h)
+
+    def _pump_alerts(self) -> int:
+        """Drain libtorrent alerts. Must never raise – the poll loop depends on it."""
+        try:
+            alerts = list(self._session.pop_alerts() or [])
+        except Exception as exc:
+            log.debug("pop_alerts failed: %s", exc)
+            return 0
+        handled = 0
+        for alert in alerts:
+            name = type(alert).__name__
+            try:
+                if name == "save_resume_data_alert":
+                    self._on_resume_alert(alert)
+                elif name == "save_resume_data_failed_alert":
+                    did = self._download_id_for_handle(getattr(alert, "handle", None))
+                    if did:
+                        self._pending_resume.pop(did, None)
+                    log.debug("save_resume_data failed: %s", alert)
+                elif name == "metadata_received_alert":
+                    self._on_metadata_received(alert)
+                elif name in ("torrent_error_alert", "file_error_alert"):
+                    log.warning("libtorrent: %s", alert)
+                else:
+                    continue
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning("Alert %s could not be handled: %s", name, exc)
+                continue
+            handled += 1
+        return handled
+
+    def _on_resume_alert(self, alert: object) -> None:
+        did = self._download_id_for_handle(getattr(alert, "handle", None))
+        if not did:
+            return  # seed torrent or already removed
+        self._pending_resume.pop(did, None)
+        rec = self._paused.get(did)
+        if not rec:
+            return
+        lt = _lt()
+        blob = resume_mod.encode_resume_alert(lt, alert)
+        if not blob:
+            return
+        if self._resume_store.save_resume(did, rec.info_hash, blob):
+            rec.has_resume_data = True
+            rec.resume_saved_at = time.time()
+            log.debug("Resume data saved for %s (%d bytes)", did, len(blob))
+
+    def _on_metadata_received(self, alert: object) -> None:
+        """Cache the .torrent and snapshot resume data as soon as metadata lands."""
+        handle = getattr(alert, "handle", None)
+        did = self._download_id_for_handle(handle)
+        if not did:
+            return
+        rec = self._paused.get(did)
+        h = self._handles.get(did)
+        if not rec or not h:
+            return
+        self._meta_wait_since.pop(did, None)
+        lt = _lt()
+        if not self._resume_store.has_metadata(did, rec.info_hash):
+            blob = resume_mod.torrent_bytes_from_handle(lt, handle)
+            if blob and self._resume_store.save_metadata(did, rec.info_hash, blob):
+                log.info("Torrent metadata cached for %s", rec.game_name)
+        self._request_resume_save(h, force=True)
 
     def pause_download(self, download_id: str) -> bool:
         rec = self._paused.get(download_id)
@@ -486,6 +744,11 @@ class TransferManager:
             return False
         h = self._handles.get(download_id)
         if h:
+            try:
+                self._request_resume_save(h, force=True)
+                self._pump_alerts()
+            except Exception as exc:
+                log.debug("resume save on pause failed for %s: %s", download_id, exc)
             try:
                 h.handle.pause()
             except Exception as exc:
@@ -502,7 +765,10 @@ class TransferManager:
             return False
         rec.user_paused = False
         rec.error = None
+        rec.error_recoverable = False
+        rec.restore_attempts = 0
         self._user_paused.discard(download_id)
+        address = self._peer_address_for(rec)
 
         h = self._handles.get(download_id)
         if h:
@@ -510,9 +776,9 @@ class TransferManager:
                 h.handle.resume()
             except Exception as exc:
                 log.warning("resume failed for %s: %s", download_id, exc)
-            if rec.peer_address:
+            if address:
                 try:
-                    h.handle.connect_peer((rec.peer_address, self._cfg.torrent_port))
+                    h.handle.connect_peer((address, self._cfg.torrent_port))
                 except Exception as exc:
                     log.warning("connect_peer on resume failed: %s", exc)
             self._save_state()
@@ -526,14 +792,10 @@ class TransferManager:
         if not rec:
             return False
         rec.error = None
+        rec.error_recoverable = False
+        rec.restore_attempts = 0
+        self._forget_download_timers(download_id)
         self._completed_ids.discard(download_id)
-        self._last_downloaded.pop(download_id, None)
-        self._last_progress_at.pop(download_id, None)
-        self._last_nudge_at.pop(download_id, None)
-        self._last_reannounce_at.pop(download_id, None)
-        self._last_meta_nudge_at.pop(download_id, None)
-        self._last_magnet_check_at.pop(download_id, None)
-        self._recheck_done.discard(download_id)
         self._user_paused.discard(download_id)
         rec.user_paused = False
 
@@ -545,6 +807,7 @@ class TransferManager:
                 pass
             del self._handles[download_id]
 
+        self._peer_address_for(rec)
         return self._reattach_download(rec)
 
     def upgrade_download(self, download_id: str, magnet: str, info_hash: str) -> bool:
@@ -564,17 +827,16 @@ class TransferManager:
             except Exception:
                 pass
 
+        # Blobs are keyed by the old info hash – they describe a different torrent now.
+        self._resume_store.discard(download_id)
+        self._by_info_hash.pop(rec.info_hash, None)
         rec.magnet = magnet
         rec.info_hash = info_hash.lower()
+        rec.has_resume_data = False
         rec.error = None
+        rec.error_recoverable = False
         self._completed_ids.discard(download_id)
-        self._last_downloaded.pop(download_id, None)
-        self._last_progress_at.pop(download_id, None)
-        self._last_nudge_at.pop(download_id, None)
-        self._last_reannounce_at.pop(download_id, None)
-        self._last_meta_nudge_at.pop(download_id, None)
-        self._last_magnet_check_at.pop(download_id, None)
-        self._recheck_done.discard(download_id)
+        self._forget_download_timers(download_id)
 
         if not self._reattach_download(rec):
             return False
@@ -585,18 +847,28 @@ class TransferManager:
         )
         return True
 
-    def remove_download(self, download_id: str, *, delete_files: bool = False) -> bool:
-        rec = self._paused.pop(download_id, None)
-        h = self._handles.pop(download_id, None)
-        self._user_paused.discard(download_id)
-        self._completed_ids.discard(download_id)
+    def _forget_download_timers(self, download_id: str) -> None:
+        """Reset every per-download timer/heuristic (retry, upgrade, removal)."""
         self._last_downloaded.pop(download_id, None)
         self._last_progress_at.pop(download_id, None)
         self._last_nudge_at.pop(download_id, None)
         self._last_reannounce_at.pop(download_id, None)
         self._last_meta_nudge_at.pop(download_id, None)
         self._last_magnet_check_at.pop(download_id, None)
+        self._last_resume_save_at.pop(download_id, None)
+        self._meta_wait_since.pop(download_id, None)
+        self._pending_resume.pop(download_id, None)
         self._recheck_done.discard(download_id)
+
+    def remove_download(self, download_id: str, *, delete_files: bool = False) -> bool:
+        rec = self._paused.pop(download_id, None)
+        h = self._handles.pop(download_id, None)
+        self._user_paused.discard(download_id)
+        self._completed_ids.discard(download_id)
+        self._forget_download_timers(download_id)
+        self._resume_store.discard(download_id)
+        if rec:
+            self._by_info_hash.pop(rec.info_hash, None)
         if h:
             try:
                 self._session.remove_torrent(h.handle)
@@ -630,7 +902,7 @@ class TransferManager:
         save_path = dest_path.parent
         save_path.mkdir(parents=True, exist_ok=True)
         try:
-            params = _parse_magnet_params(lt, rec.magnet, str(save_path))
+            params, source = self._params_for_record(lt, rec, save_path)
             handle = self._session.add_torrent(params)
             if rec.peer_address:
                 handle.connect_peer((rec.peer_address, self._cfg.torrent_port))
@@ -643,8 +915,10 @@ class TransferManager:
                 handle=handle,
                 dest_path=dest_path,
             )
+            if rec.info_hash:
+                self._by_info_hash[rec.info_hash] = rec.download_id
             self._save_state()
-            log.info("Download re-attached: %s", rec.download_id)
+            log.info("Download %s re-attached via %s", rec.download_id, source)
             return True
         except Exception as exc:
             rec.error = _friendly_transfer_error(str(exc))
@@ -777,22 +1051,68 @@ class TransferManager:
         if cover.download_cover_from_url(dest, url):
             log.info("Saved cover for downloaded game %s (from %s)", h.game_name, h.peer_name)
 
-    def shutdown(self) -> None:
+    def shutdown(self, *, timeout: float = _SHUTDOWN_RESUME_BUDGET) -> None:
+        """Persist resume data and download state before the process goes away."""
+        if self._shutdown_done:
+            return
+        self._shutdown_done = True
         if self._poll_task:
             self._poll_task.cancel()
-        for h in self._handles.values():
+        self._flush_resume_data(timeout)
+        self._save_state()
+        log.info("TransferManager shut down")
+
+    def _flush_resume_data(self, timeout: float) -> None:
+        """Pause the session and write resume blobs within a hard time budget."""
+        try:
+            _lt()
+        except RuntimeError:
+            return
+        try:
+            self._session.pause()
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug("session.pause failed: %s", exc)
+
+        self._pending_resume.clear()
+        requested = 0
+        for h in list(self._handles.values()):
             try:
                 h.handle.pause()
             except Exception:
                 pass
-        log.info("TransferManager shut down")
+            if self._request_resume_save(h, force=True):
+                requested += 1
+        if not requested:
+            return
+
+        deadline = time.monotonic() + timeout
+        while self._pending_resume and time.monotonic() < deadline:
+            self._pump_alerts()
+            if not self._pending_resume:
+                break
+            try:
+                self._session.wait_for_alert(50)
+            except Exception:  # pragma: no cover - defensive
+                time.sleep(0.05)
+        self._pump_alerts()
+        if self._pending_resume:
+            log.warning(
+                "Resume-Daten für %d Download(s) nicht gespeichert (Zeitbudget %.1fs)",
+                len(self._pending_resume),
+                timeout,
+            )
 
     # -- Internal --
 
     def _sync_rec_from_status(self, rec: _PersistedRecord, status: DownloadStatus) -> None:
-        rec.progress = status.progress
-        rec.downloaded_bytes = status.downloaded_bytes
-        rec.total_bytes = status.total_bytes
+        if status.total_bytes > 0:
+            rec.progress = status.progress
+            rec.downloaded_bytes = status.downloaded_bytes
+            rec.total_bytes = status.total_bytes
+        elif status.downloaded_bytes > rec.downloaded_bytes:
+            # Metadata not in yet: the total is unknown, so never regress what
+            # we already knew – that is what wiped the remembered progress.
+            rec.downloaded_bytes = status.downloaded_bytes
         if status.error:
             rec.error = status.error
 
@@ -806,6 +1126,9 @@ class TransferManager:
         else:
             status = "queued"
         err = rec.error
+        phase = status
+        if status == "queued":
+            phase = "metadata" if rec.total_bytes <= 0 else "queued"
         return DownloadStatus(
             id=rec.download_id,
             game_id=rec.game_id,
@@ -822,6 +1145,7 @@ class TransferManager:
             error=err,
             error_hint=_transfer_error_hint(err) if err else None,
             dest_path=rec.dest_path,
+            phase=phase,
         )
 
     def _build_status(self, h: _Handle) -> DownloadStatus:
@@ -835,6 +1159,14 @@ class TransferManager:
             downloaded_bytes, total_bytes, bytes_remaining = _bytes_from_status(s)
             pieces_total, pieces_missing = _pieces_from_status(s)
             lt_complete = _torrent_is_complete(lt, s)
+
+            phase = _phase_from_state(status_str, total_bytes, lt_complete)
+            phase_progress = 0.0
+            if phase == "checking":
+                try:
+                    phase_progress = min(1.0, max(0.0, float(getattr(s, "progress", 0.0) or 0.0)))
+                except (TypeError, ValueError):
+                    phase_progress = 0.0
 
             if status_str == "checking":
                 status_str = "verifying" if lt_complete else "queued"
@@ -868,6 +1200,12 @@ class TransferManager:
             elif status_str in ("done", "seeding") and not lt_complete:
                 status_str = "downloading"
 
+            if status_str in ("paused", "error"):
+                phase = status_str
+
+            last_at = self._last_progress_at.get(h.download_id)
+            stall_seconds = int(time.monotonic() - last_at) if last_at else 0
+
             out = DownloadStatus(
                 id=h.download_id,
                 game_id=h.game_id,
@@ -886,6 +1224,9 @@ class TransferManager:
                 error=err,
                 error_hint=hint,
                 dest_path=str(h.dest_path),
+                phase=phase,
+                phase_progress=phase_progress,
+                stall_seconds=max(0, stall_seconds),
             )
             if rec:
                 self._sync_rec_from_status(rec, out)
@@ -915,6 +1256,7 @@ class TransferManager:
                 error=err,
                 error_hint=hint,
                 dest_path=str(h.dest_path),
+                phase="error",
             )
             return out
 
@@ -930,6 +1272,14 @@ class TransferManager:
         except OSError as exc:
             log.warning("Could not save download state: %s", exc)
 
+    def _save_state_throttled(self) -> None:
+        """Persist progress while downloading, without hammering the disk."""
+        now = time.monotonic()
+        if now - self._last_state_save_at < _STATE_SAVE_INTERVAL:
+            return
+        self._last_state_save_at = now
+        self._save_state()
+
     def _load_state(self) -> None:
         path = self._cfg.downloads_state_path
         if not path.exists():
@@ -941,6 +1291,8 @@ class TransferManager:
                 filtered = {k: v for k, v in item.items() if k in field_names}
                 rec = _PersistedRecord(**filtered)
                 self._paused[rec.download_id] = rec
+                if rec.info_hash:
+                    self._by_info_hash[rec.info_hash] = rec.download_id
                 if rec.user_paused:
                     self._user_paused.add(rec.download_id)
             if self._paused:
@@ -963,6 +1315,9 @@ class TransferManager:
             "bytes_remaining": status.bytes_remaining,
             "error": status.error,
             "error_hint": status.error_hint,
+            "phase": status.phase,
+            "phase_progress": status.phase_progress,
+            "stall_seconds": status.stall_seconds,
         }
 
     def _track_progress(self, download_id: str, downloaded_bytes: int) -> None:
@@ -974,6 +1329,57 @@ class TransferManager:
         elif downloaded_bytes > prev:
             self._last_progress_at[download_id] = now
             self._last_downloaded[download_id] = downloaded_bytes
+            rec = self._paused.get(download_id)
+            if rec:
+                rec.last_progress_at = time.time()
+                if rec.error and rec.error_recoverable:
+                    # Data is flowing again – a stall guess must not stay pinned.
+                    log.info("Download %s recovered, clearing stall error", download_id)
+                    rec.error = None
+                    rec.error_recoverable = False
+                    self._recheck_done.discard(download_id)
+
+    def _set_recoverable_error(self, rec: _PersistedRecord, message: str) -> None:
+        if rec.error:
+            return
+        rec.error = message
+        rec.error_recoverable = True
+        rec.error_at = time.time()
+        self._save_state()
+
+    def _ensure_peer_connection(self, h: _Handle, status: DownloadStatus) -> None:
+        """Reconnect to the host whenever no peer is attached – in any phase.
+
+        The old stall handling only ran in the endgame (< 5 MiB left), so a
+        download that lost its host mid-transfer just sat there forever.
+        """
+        if status.status not in ("queued", "downloading", "verifying"):
+            return
+        if status.num_peers > 0:
+            return
+        rec = self._paused.get(h.download_id)
+        if not rec:
+            return
+        address = self._peer_address_for(rec)
+        if not address:
+            return
+
+        now = time.monotonic()
+        did = h.download_id
+        if now - self._last_nudge_at.get(did, 0) >= _NO_PEER_NUDGE_INTERVAL:
+            self._last_nudge_at[did] = now
+            try:
+                h.handle.connect_peer((address, self._cfg.torrent_port))
+                log.debug("connect_peer (no peers) for %s → %s", did, address)
+            except Exception as exc:
+                log.warning("connect_peer failed for %s: %s", did, exc)
+
+        if now - self._last_reannounce_at.get(did, 0) >= _NO_PEER_REANNOUNCE_INTERVAL:
+            self._last_reannounce_at[did] = now
+            try:
+                h.handle.force_reannounce()
+            except Exception as exc:
+                log.debug("force_reannounce failed for %s: %s", did, exc)
 
     def _nudge_metadata(self, h: _Handle, status: DownloadStatus) -> None:
         """Reconnect to the host while torrent metadata is still missing.
@@ -982,32 +1388,70 @@ class TransferManager:
         metadata arrives. DHT/trackers are LAN-only, so we periodically reconnect
         to the known peer to fetch it instead of waiting for mDNS rediscovery.
         """
+        did = h.download_id
         if status.status != "queued" or status.total_bytes > 0:
+            self._meta_wait_since.pop(did, None)
             return
-        rec = self._paused.get(h.download_id)
-        if not rec or not rec.peer_address:
+        rec = self._paused.get(did)
+        if not rec:
             return
+
         now = time.monotonic()
-        if now - self._last_meta_nudge_at.get(h.download_id, 0) < _METADATA_NUDGE_INTERVAL:
+        waiting_since = self._meta_wait_since.setdefault(did, now)
+        address = self._peer_address_for(rec)
+
+        if now - waiting_since >= _METADATA_ERROR_AFTER:
+            if status.num_peers > 0:
+                message = (
+                    "Host liefert keine Torrent-Daten – am Host das Spiel neu "
+                    "freigeben (Torrent neu erstellen), dann „Erneut“."
+                )
+            else:
+                message = (
+                    f"Keine Verbindung zum Host ({address or 'unbekannt'}). Läuft DeckDrop "
+                    "dort und ist Port 7374 offen? „Erneut“ versuchen."
+                )
+            self._set_recoverable_error(rec, message)
+
+        if not address:
             return
-        self._last_meta_nudge_at[h.download_id] = now
+        if now - self._last_meta_nudge_at.get(did, 0) < _METADATA_NUDGE_INTERVAL:
+            return
+        self._last_meta_nudge_at[did] = now
         try:
-            h.handle.connect_peer((rec.peer_address, self._cfg.torrent_port))
-            log.debug("metadata nudge: connect_peer for %s", h.download_id)
+            h.handle.connect_peer((address, self._cfg.torrent_port))
+            log.debug("metadata nudge: connect_peer for %s", did)
         except Exception as exc:
-            log.warning("metadata nudge connect_peer failed for %s: %s", h.download_id, exc)
+            log.warning("metadata nudge connect_peer failed for %s: %s", did, exc)
 
     def _nudge_stalled_download(self, h: _Handle, status: DownloadStatus) -> None:
         """Reconnect to host when near-complete; error if stuck too long."""
         if status.status not in ("downloading", "queued", "verifying"):
             return
         remaining = status.bytes_remaining
-        if remaining <= 0 or remaining > _STALL_REMAINING_MAX:
+        if remaining <= 0:
             return
 
         did = h.download_id
         now = time.monotonic()
         self._track_progress(did, status.downloaded_bytes)
+
+        if remaining > _STALL_REMAINING_MAX:
+            # Mid-download stall: only complain while a peer is actually
+            # connected – a host that is simply off is handled by the
+            # reconnect loop and must not dead-end the download.
+            if status.num_peers <= 0 or status.total_bytes <= 0:
+                return
+            last_at = self._last_progress_at.get(did, now)
+            if now - last_at >= _MIDSTALL_ERROR_AFTER:
+                rec = self._paused.get(did)
+                if rec:
+                    self._set_recoverable_error(
+                        rec,
+                        "Seit 5 Minuten keine Daten vom Host – Host prüfen, "
+                        "der Download versucht es weiter.",
+                    )
+            return
 
         last_at = self._last_progress_at.get(did, now)
         stall_limit = 180.0 if remaining < 1024 * 1024 else _STALL_ERROR_AFTER
@@ -1015,16 +1459,16 @@ class TransferManager:
             rec = self._paused.get(did)
             if rec and not rec.error:
                 if status.num_peers > 0 and status.pieces_missing > 0:
-                    rec.error = (
+                    message = (
                         "Host liefert letzte Daten nicht – auf dem Host Torrent neu "
                         "erstellen (Metadaten geändert?). „Erneut“ versuchen."
                     )
                 else:
-                    rec.error = (
+                    message = (
                         "Download hängt bei den letzten Daten – "
                         "Host erreichbar und online? „Erneut“ versuchen."
                     )
-                self._save_state()
+                self._set_recoverable_error(rec, message)
             return
 
         rec = self._paused.get(did)
@@ -1120,6 +1564,7 @@ class TransferManager:
             return
         self._completed_ids.add(status.id)
         self._register_downloaded_game(h)
+        self._promote_metadata_to_cache(h)
         try:
             await asyncio.to_thread(self._fetch_and_save_cover, h)
         except Exception as exc:
@@ -1141,76 +1586,120 @@ class TransferManager:
                 exclude_paths=self.incomplete_download_dest_paths(),
             )
 
+    def _promote_metadata_to_cache(self, h: _Handle) -> None:
+        """Reuse the downloaded torrent for seeding instead of re-hashing it."""
+        rec = self._paused.get(h.download_id)
+        if not rec:
+            return
+        cached = self._resume_store.find_metadata(h.download_id, rec.info_hash)
+        if cached is None:
+            return
+        target = self._cfg.torrent_cache / f"{h.game_id}.torrent"
+        if target.exists():
+            return
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(cached, target)
+            log.info("Torrent cache filled from download for %s", h.game_name)
+        except OSError as exc:
+            log.debug("Could not copy torrent metadata for %s: %s", h.game_id, exc)
+
     async def _poll_loop(self) -> None:
         while True:
             await asyncio.sleep(1)
-            done_ids: list[str] = []
+            try:
+                await self._poll_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning("Download poll tick failed: %s", exc)
 
-            for h in list(self._handles.values()):
-                if await self._maybe_upgrade_from_peer(h):
-                    h = self._handles.get(h.download_id)
-                    if not h:
-                        continue
-                status = self._build_status(h)
+    async def _poll_once(self) -> None:
+        done_ids: list[str] = []
+        self._pump_alerts()
 
-                lt = _lt()
-                is_complete = _torrent_is_complete(lt, _torrent_status(h.handle))
+        for h in list(self._handles.values()):
+            try:
+                finished = await self._poll_download(h)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("Download %s could not be polled: %s", h.download_id, exc)
+                continue
+            if finished:
+                done_ids.append(h.download_id)
 
-                if is_complete and status.status != "error":
-                    await self._finalize_download(h, status)
-                    if self._cfg.seed_after_download:
-                        self._promote_download_to_seed(h)
-                    done_ids.append(status.id)
-                    continue
+        self._cleanup_finished(done_ids)
+        self._save_state_throttled()
 
-                self._nudge_metadata(h, status)
-                self._nudge_stalled_download(h, status)
-                await broadcast("download_progress", self._progress_payload(status))
+    async def _poll_download(self, h: _Handle) -> bool:
+        """One tick for a single download; True when it just finished."""
+        if await self._maybe_upgrade_from_peer(h):
+            reattached = self._handles.get(h.download_id)
+            if not reattached:
+                return False
+            h = reattached
+        status = self._build_status(h)
 
-                if status.status == "error":
-                    rec = self._paused.get(h.download_id)
-                    if rec:
-                        rec.error = status.error or rec.error
-                        self._save_state()
+        if status.status == "done":
+            await self._finalize_download(h, status)
+            if self._cfg.seed_after_download:
+                self._promote_download_to_seed(h)
+            return True
+
+        self._nudge_metadata(h, status)
+        self._ensure_peer_connection(h, status)
+        self._nudge_stalled_download(h, status)
+        self._maybe_save_resume(h, status)
+        await broadcast("download_progress", self._progress_payload(status))
+
+        if status.status == "error":
+            rec = self._paused.get(h.download_id)
+            recoverable = bool(rec and rec.error_recoverable)
+            if rec:
+                rec.error = status.error or rec.error
+                self._save_state()
+            if not recoverable:
+                # Heuristic stalls keep running; only hard libtorrent errors stop.
+                try:
+                    h.handle.pause()
+                except Exception:
+                    pass
+            await broadcast(
+                "download_error",
+                {
+                    "id": status.id,
+                    "game_id": status.game_id,
+                    "error": status.error or "Unbekannter Übertragungsfehler.",
+                    "error_hint": status.error_hint,
+                    "status": "error",
+                    "progress": status.progress,
+                    "downloaded_bytes": status.downloaded_bytes,
+                    "total_bytes": status.total_bytes,
+                    "pieces_total": status.pieces_total,
+                    "pieces_missing": status.pieces_missing,
+                    "bytes_remaining": status.bytes_remaining,
+                    "phase": status.phase,
+                    "stall_seconds": status.stall_seconds,
+                },
+            )
+        return False
+
+    def _cleanup_finished(self, done_ids: list[str]) -> None:
+        for did in done_ids:
+            rec = self._paused.pop(did, None)
+            h = self._handles.pop(did, None)
+            self._forget_download_timers(did)
+            self._resume_store.discard(did)
+            if rec:
+                self._by_info_hash.pop(rec.info_hash, None)
+            if h:
+                promoted = (
+                    self._cfg.seed_after_download and self._seed_handles.get(h.game_id) is h.handle
+                )
+                if not promoted:
                     try:
-                        h.handle.pause()
+                        self._session.remove_torrent(h.handle)
                     except Exception:
                         pass
-                    await broadcast(
-                        "download_error",
-                        {
-                            "id": status.id,
-                            "game_id": status.game_id,
-                            "error": status.error or "Unbekannter Übertragungsfehler.",
-                            "error_hint": status.error_hint,
-                            "status": "error",
-                            "progress": status.progress,
-                            "downloaded_bytes": status.downloaded_bytes,
-                            "total_bytes": status.total_bytes,
-                            "pieces_total": status.pieces_total,
-                            "pieces_missing": status.pieces_missing,
-                            "bytes_remaining": status.bytes_remaining,
-                        },
-                    )
-
-            for did in done_ids:
-                self._paused.pop(did, None)
-                h = self._handles.pop(did, None)
-                self._last_downloaded.pop(did, None)
-                self._last_progress_at.pop(did, None)
-                self._last_nudge_at.pop(did, None)
-                self._last_reannounce_at.pop(did, None)
-                self._last_meta_nudge_at.pop(did, None)
-                self._last_magnet_check_at.pop(did, None)
-                self._recheck_done.discard(did)
-                if h:
-                    promoted = (
-                        self._cfg.seed_after_download
-                        and self._seed_handles.get(h.game_id) is h.handle
-                    )
-                    if not promoted:
-                        try:
-                            self._session.remove_torrent(h.handle)
-                        except Exception:
-                            pass
-                self._save_state()
+            self._save_state()

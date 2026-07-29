@@ -23,6 +23,8 @@ _DEFAULTS: dict[str, Any] = {
     "paths": {
         "download_dir": str(Path.home() / "Games" / "DeckDrop-Games"),
         "torrent_cache": str(Path.home() / ".local" / "share" / "deckdrop" / "torrents"),
+        # libtorrent fast-resume blobs, so interrupted downloads continue without re-hashing
+        "resume_dir": str(Path.home() / ".local" / "share" / "deckdrop" / "resume"),
         # List of individual game folder paths added manually
         "game_paths": [],
     },
@@ -83,6 +85,14 @@ class Config:
     @property
     def torrent_cache(self) -> Path:
         return Path(self._data["paths"]["torrent_cache"]).expanduser()
+
+    @property
+    def resume_dir(self) -> Path:
+        """Where libtorrent fast-resume blobs live (derived for pre-2.0 configs)."""
+        raw = self._data["paths"].get("resume_dir")
+        if raw:
+            return Path(raw).expanduser()
+        return Path(self._data["paths"]["torrent_cache"]).expanduser().parent / "resume"
 
     @property
     def downloads_state_path(self) -> Path:

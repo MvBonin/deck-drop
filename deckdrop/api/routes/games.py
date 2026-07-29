@@ -24,7 +24,6 @@ from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
 from deckdrop.core import game as game_mod
 from deckdrop.core import integrity, torrent_prep
-from deckdrop.core.cover import COVER_FILENAMES, clear_covers, download_steam_cover, has_local_cover
 from deckdrop.core.comments import (
     Comment,
     load_comments,
@@ -32,6 +31,7 @@ from deckdrop.core.comments import (
     save_comments,
 )
 from deckdrop.core.config import save as save_cfg
+from deckdrop.core.cover import COVER_FILENAMES, clear_covers, download_steam_cover, has_local_cover
 from deckdrop.core.game import GameInfo
 
 log = logging.getLogger(__name__)

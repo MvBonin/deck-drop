@@ -228,3 +228,31 @@ def test_start_download_german_404_peer(tmp_path, monkeypatch):
     r = c.post("/api/download", json={"peer_id": "missing", "game_id": "g1"})
     assert r.status_code == 404
     assert "nicht gefunden" in r.json()["detail"]
+
+
+def test_downloads_expose_phase_fields(client):
+    """The UI needs the phase to tell "checking files" from "waiting for host"."""
+    status = DownloadStatus(
+        id="d1",
+        game_id="g1",
+        game_name="Test",
+        peer_id="p1",
+        peer_name="Host",
+        status="queued",
+        progress=0.4,
+        speed_bytes_sec=0,
+        downloaded_bytes=64_000_000,
+        total_bytes=160_000_000,
+        num_peers=1,
+        phase="checking",
+        phase_progress=0.37,
+        stall_seconds=42,
+    )
+    transfer = MagicMock()
+    transfer.all_statuses.return_value = [status]
+    app_state.get().transfer = transfer
+
+    row = client.get("/api/downloads").json()[0]
+    assert row["phase"] == "checking"
+    assert row["phase_progress"] == pytest.approx(0.37)
+    assert row["stall_seconds"] == 42
