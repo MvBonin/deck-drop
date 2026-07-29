@@ -104,6 +104,9 @@ export function formatTransferError(raw) {
 }
 
 const TRANSFER_HINT_PATTERNS = [
+  [/keine verbindung zum host/i, 'Host einschalten, DeckDrop dort starten, Port 7374 freigeben.'],
+  [/liefert keine torrent-daten/i, 'Am Host das Spiel neu freigeben, dann „Erneut“.'],
+  [/keine daten vom host/i, 'Host online lassen; der Download verbindet sich selbst neu.'],
   [/hash|piece/i, 'Erneut versuchen; Host-Dateien prüfen.'],
   [/no space|disk/i, 'Speicherplatz freigeben, dann „Erneut“.'],
   [/0 peers|no peers/i, 'Host online lassen und erneut versuchen.'],

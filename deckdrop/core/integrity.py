@@ -6,9 +6,9 @@ import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
-CHUNK_SIZE = 1024 * 1024  # 1 MB
-
 from deckdrop.core.cover import COVER_FILENAMES
+
+CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 # Local metadata / UI assets — never part of the BitTorrent payload.
 TORRENT_SKIP_FILENAMES = frozenset({"deckdrop.toml", "comments.toml", *COVER_FILENAMES})

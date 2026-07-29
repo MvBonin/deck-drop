@@ -27,6 +27,23 @@ def _allow_testclient_as_local(monkeypatch):
 
 
 @pytest.fixture
+def isolated_config(tmp_path, monkeypatch):
+    """Config whose paths all live under tmp_path.
+
+    Patching CONFIG_PATH alone is not enough: download_dir, torrent_cache and
+    downloads-state.json still point at the real home directory, so tests would
+    write into ~/.local/share/deckdrop.
+    """
+    monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
+    cfg = cfg_mod.load()
+    cfg._data["paths"]["download_dir"] = str(tmp_path / "games")
+    cfg._data["paths"]["torrent_cache"] = str(tmp_path / "torrents")
+    cfg._data["paths"]["resume_dir"] = str(tmp_path / "resume")
+    cfg_mod.save(cfg)
+    return cfg
+
+
+@pytest.fixture
 def make_game():
     """Factory: write a game to disk and return its GameInfo."""
 

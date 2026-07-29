@@ -92,6 +92,9 @@ class DownloadOut(BaseModel):
     error: str | None = None
     error_hint: str | None = None
     dest_path: str | None = None
+    phase: str = "queued"  # metadata | checking | verifying | downloading | queued | done
+    phase_progress: float = 0.0  # file check progress while phase == "checking"
+    stall_seconds: int = 0
 
 
 def _to_out(status: object) -> DownloadOut:
