@@ -494,12 +494,29 @@ class TransferManager:
         except Exception as exc:
             log.warning("recheck_seed failed for %s: %s", game_id, exc)
 
+    def _is_shareable(self, game_id: str) -> bool:
+        """False only if a content tracker exists and says the game was modified.
+
+        Fails open (True) when AppState/ContentTracker are unavailable, e.g.
+        in tests that construct TransferManager standalone.
+        """
+        from deckdrop.api import state as app_state
+
+        try:
+            s = app_state.get()
+        except RuntimeError:
+            return True
+        return s.get_content_tracker().is_shareable(game_id)
+
     def seed_from_cache(self, game_id: str, game_path: Path, torrent_path: Path) -> None:
         """Seed a local game from a cached .torrent file (host side)."""
         if game_id in self._seed_handles:
             return
         if not torrent_path.is_file() or not game_path.is_dir():
             log.warning("Cannot seed %s: missing torrent or game path", game_id)
+            return
+        if not self._is_shareable(game_id):
+            log.info("Not seeding %s: content was modified since last publish", game_id)
             return
         from deckdrop.core.torrent import retarget_root
 

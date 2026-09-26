@@ -22,8 +22,8 @@ from pydantic import BaseModel
 
 from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
+from deckdrop.core import content, integrity, torrent_prep
 from deckdrop.core import game as game_mod
-from deckdrop.core import integrity, torrent_prep
 from deckdrop.core.comments import (
     Comment,
     load_comments,
@@ -63,21 +63,31 @@ class GameOut(BaseModel):
     launch_exe: str = ""
     launch_args: str = ""
     runner: str = ""
+    content_state: str = "clean"
+    shareable: bool = True
+    change_summary: dict[str, int] = {"changed": 0, "removed": 0, "added": 0}
+    revision: int = 1
+    version_label: str = ""
+    version_note: str = ""
+    created_by: str = ""
+    content_updated_by: str = ""
+    content_updated_at: str = ""
+    content_hash: str = ""
 
     @classmethod
     def from_info(cls, g: GameInfo) -> GameOut:
-        cfg = app_state.get().cfg
+        s = app_state.get()
+        cfg = s.cfg
+        tracker = s.get_content_tracker()
         prep_error = torrent_prep.get_prep_error(g.id)
         has_torrent = bool(g.torrent.magnet)
         # Peer downloads do not need local torrent prep (only locally shared games do).
         local_share = not (g.origin.peer_id or g.origin.peer_name)
-        preparing = local_share and (
-            torrent_prep.is_preparing(g.id)
-            or (
-                not has_torrent
-                and prep_error is None
-                and not torrent_prep.has_cached_torrent(cfg, g.id)
-            )
+        preparing = torrent_prep.is_preparing(g.id) or (
+            local_share
+            and not has_torrent
+            and prep_error is None
+            and not torrent_prep.has_cached_torrent(cfg, g.id)
         )
         prep_progress: float | None = None
         if preparing:
@@ -85,6 +95,7 @@ class GameOut(BaseModel):
             if prep_progress is None:
                 prep_progress = 0.0
         local_cover = has_local_cover(g.path)
+        content_state = tracker.state(g.id)
         return cls(
             id=g.id,
             name=g.name,
@@ -107,6 +118,16 @@ class GameOut(BaseModel):
             launch_exe=g.launch_exe,
             launch_args=g.steam.launch_args,
             runner=g.steam.runner,
+            content_state=content_state,
+            shareable=has_torrent and tracker.is_shareable(g.id),
+            change_summary=tracker.summary(g.id),
+            revision=g.content.revision,
+            version_label=g.content.version_label,
+            version_note=g.content.note,
+            created_by=g.content.created_by,
+            content_updated_by=g.content.updated_by,
+            content_updated_at=g.content.updated_at,
+            content_hash=g.content.content_hash,
         )
 
 
@@ -351,6 +372,14 @@ def get_magnet(game_id: str) -> dict[str, str]:
     if not g:
         raise HTTPException(404, "Spiel nicht gefunden")
 
+    tracker = s.get_content_tracker()
+    tracker.scan(game_id)
+    if not tracker.is_shareable(game_id):
+        raise HTTPException(
+            409,
+            "Spiel wurde verändert – erst als Update veröffentlichen.",
+        )
+
     if not g.torrent.magnet:
         torrent_prep.restore_from_cache(game_id)
     if not g.torrent.magnet:
@@ -370,25 +399,114 @@ def get_magnet(game_id: str) -> dict[str, str]:
     return {"magnet": g.torrent.magnet, "info_hash": g.torrent.info_hash}
 
 
+class PublishRequest(BaseModel):
+    version_label: str = ""
+    note: str = ""
+    exclude: list[str] = []
+
+
+_CHANGE_LIST_LIMIT = 500
+
+
+@router.post("/games/scan", dependencies=[Depends(local_only)])
+def scan_all_games() -> dict[str, str]:
+    """Scan every local game synchronously and return {game_id: state}."""
+    s = app_state.get()
+    tracker = s.get_content_tracker()
+    result: dict[str, str] = {}
+    for g in s.library.all():
+        if g.origin.peer_id or g.origin.peer_name:
+            # Downloaded copies aren't hashed/tracked the same way (yet).
+            continue
+        result[g.id] = tracker.scan(g.id)
+    return result
+
+
+@router.post("/games/{game_id}/scan", response_model=GameOut, dependencies=[Depends(local_only)])
+def scan_game(game_id: str) -> GameOut:
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+    s.get_content_tracker().scan(game_id)
+    return GameOut.from_info(g)
+
+
+@router.get("/games/{game_id}/changes", dependencies=[Depends(local_only)])
+def get_changes(game_id: str) -> dict[str, object]:
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+    tracker = s.get_content_tracker()
+    tracker.scan(game_id)
+    lists = tracker.change_lists(game_id)
+
+    def _stat_size(rel: str) -> int | None:
+        try:
+            return (g.path / rel).stat().st_size
+        except OSError:
+            return None
+
+    changed = [
+        {"path": rel, "old_size": g.sizes.get(rel), "new_size": _stat_size(rel)}
+        for rel in lists["changed"]
+    ]
+    removed = [{"path": rel, "size": g.sizes.get(rel)} for rel in lists["removed"]]
+    added = [{"path": rel, "size": _stat_size(rel)} for rel in lists["added"]]
+
+    truncated = False
+    if len(changed) > _CHANGE_LIST_LIMIT:
+        changed = changed[:_CHANGE_LIST_LIMIT]
+        truncated = True
+    if len(removed) > _CHANGE_LIST_LIMIT:
+        removed = removed[:_CHANGE_LIST_LIMIT]
+        truncated = True
+    if len(added) > _CHANGE_LIST_LIMIT:
+        added = added[:_CHANGE_LIST_LIMIT]
+        truncated = True
+
+    return {
+        "changed": changed,
+        "removed": removed,
+        "added": added,
+        "revision": g.content.revision,
+        "version_label": g.content.version_label,
+        "truncated": truncated,
+    }
+
+
+@router.post("/games/{game_id}/publish", status_code=202, dependencies=[Depends(local_only)])
+def publish_game(game_id: str, req: PublishRequest) -> dict[str, str]:
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+
+    for rel in req.exclude:
+        if content.safe_join(g.path, rel) is None:
+            raise HTTPException(400, f"Ungültiger Pfad: {rel}")
+
+    tracker = s.get_content_tracker()
+    state = tracker.state(game_id)
+    if state in ("hashing", "publishing", "updating"):
+        raise HTTPException(400, f"Spiel ist gerade beschäftigt ({state})")
+
+    tracker.publish(game_id, req.version_label.strip(), req.note.strip(), req.exclude)
+    return {"status": "publishing"}
+
+
 # -- Background task --
 
 
 def _hash_game_files(game_id: str) -> None:
-    """Hash all game files and update deckdrop.toml (runs after torrent prep is scheduled)."""
-    import logging
+    """Build the content baseline (files/sizes/content_hash) for a freshly added game.
 
-    log = logging.getLogger(__name__)
+    Delegates to ContentTracker.ensure_baseline, which (unlike the old
+    implementation) does NOT invalidate the torrent that schedule_prepare()
+    just started building.
+    """
     try:
-        s = app_state.get()
-        g = s.library.get(game_id)
-        if not g:
-            return
-        old_files = dict(g.files)
-        hashes, total = integrity.hash_directory(g.path)
-        if hashes != old_files:
-            torrent_prep.invalidate_torrent(game_id)
-        g.files = hashes
-        g.size_bytes = total
-        game_mod.save(g)
+        app_state.get().get_content_tracker().ensure_baseline(game_id)
     except Exception as exc:
-        log.error("Hashing failed for game %s: %s", game_id, exc)
+        log.error("Baseline hashing failed for game %s: %s", game_id, exc)

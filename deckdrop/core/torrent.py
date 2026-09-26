@@ -75,25 +75,52 @@ _LAN_SETTINGS_OPTIONAL = {
 }
 
 
+def choose_piece_size(total_bytes: int) -> int:
+    """Piece size rule (docs/plans/game-updates.md 3.1): smaller pieces = finer
+    delta on updates, but not so small the torrent metadata gets huge."""
+    gib = 1024**3
+    if total_bytes < 2 * gib:
+        return 1024 * 1024  # 1 MiB
+    if total_bytes < 16 * gib:
+        return 2 * 1024 * 1024  # 2 MiB
+    return 4 * 1024 * 1024  # 4 MiB
+
+
 def create_torrent_data(
     game_path: Path,
+    files: list[str] | None = None,
+    piece_size: int | None = None,
     on_progress: Callable[[float], None] | None = None,
 ) -> bytes:
-    """Create a .torrent file (as bytes) from a game directory."""
+    """Create a .torrent file (as bytes) from a game directory.
+
+    `files`, when given, are sorted POSIX relpaths (from the content manifest)
+    to include instead of re-scanning the directory — used for update
+    torrents so removed/local-only files never end up in the swarm. Piece
+    size defaults to `choose_piece_size(total_bytes)`. File alignment (hybrid
+    v1+v2, never v1_only) is mandatory for piece-level delta updates.
+    """
     lt = _lt()
     if on_progress:
         on_progress(0.02)
 
-    files = iter_torrent_files(game_path)
-    if not files:
+    parent = game_path.parent
+    if files is not None:
+        file_paths = [game_path / rel for rel in files]
+        file_paths = [p for p in file_paths if p.is_file()]
+    else:
+        file_paths = iter_torrent_files(game_path)
+    if not file_paths:
         raise RuntimeError(f"No shareable files in {game_path}")
 
-    parent = game_path.parent
+    total_bytes = sum(p.stat().st_size for p in file_paths)
+    size = piece_size or choose_piece_size(total_bytes)
+
     fs = lt.file_storage()
-    for file_path in files:
+    for file_path in file_paths:
         rel = file_path.relative_to(parent).as_posix()
         fs.add_file(rel, file_path.stat().st_size)
-    t = lt.create_torrent(fs)
+    t = lt.create_torrent(fs, size)
     t.set_comment(f"DeckDrop – {game_path.name}")
 
     num_pieces = max(int(t.num_pieces()), 1)

@@ -454,6 +454,36 @@ class ContentTracker:
 libtorrent-Test (`pytest.importorskip("libtorrent")`): `create_torrent_data(files=[...])` enthält nur
 diese Dateien, `has_v2()` ist True, Nicht-Pad-Dateien piece-ausgerichtet.
 
+### Abweichungen Phase 2/3 (umgesetzt 2026-09-26)
+
+- **`ContentTracker` ist eine Instanz, nicht das Modul-Singleton-Muster von `torrent_prep.py`.**
+  `AppState.content: ContentTracker | None` mit einer `get_content_tracker()`-Methode, die bei
+  `None` lazy eine neue Instanz aus `self.cfg`/`self.library` erzeugt. Dadurch bleibt
+  `app_state.init(cfg, library)` (ohne `content`-Argument) für alle bestehenden Tests
+  rückwärtskompatibel, und `deckdrop/api/routes/games.py` sowie
+  `TransferManager._is_shareable` rufen immer `s.get_content_tracker()` statt `s.content` direkt.
+  `main.py` erzeugt den Tracker weiterhin explizit und übergibt ihn an `app_state.init`, damit
+  Baseline/Scan-Loop/`bind_loop` am echten, langlebigen Objekt hängen.
+- **`scan()`/`ensure_baseline()`/`publish()` greifen für Seed-Auf/Abbau lazy per
+  `from deckdrop.api import state as app_state` auf `TransferManager` zu** (gleiches
+  Fail-open-Muster wie in `transfer.py::_registry_peer_address`), statt eine `transfer`-Referenz
+  im Konstruktor zu verlangen – vermeidet einen Import-Zyklus und deckt sich mit den
+  Testerwartungen aus 2.4 (MagicMock-Transfer via `app_state.init(..., transfer=mock)`).
+- **Detaillierte Änderungslisten** (`changed`/`removed`/`added`-Pfade, nicht nur die Zähler aus
+  `summary`) werden zusätzlich im persistierten Zustand gespeichert (`ContentTracker.change_lists`)
+  statt bei jedem `GET /changes`-Aufruf erneut aus dem Snapshot rekonstruiert zu werden – vermeidet
+  eine zweite, potenziell abweichende Reklassifizierung von `mtime_only`-Dateien.
+- **`publish()` löst zusätzlich eine neue Revision aus, wenn sich nur `content.ignore` ändert**
+  (neuer `exclude`, aber zufällig gleicher `content_hash`), nicht nur bei geändertem Hash – sonst
+  könnte ein Nutzer eine Datei aus dem Teilen nehmen, ohne dass sich am veröffentlichten Zustand
+  sichtbar etwas ändert.
+- `POST /api/games/scan` überspringt heruntergeladene Spiele (`origin.peer_id`/`peer_name` gesetzt)
+  – deren lokales Hashing/Tracking ist Teil von Phase 4/5, noch nicht Bestandteil dieses Plans.
+- `create_torrent_data(files=...)` bekommt zusätzlich `piece_size` als expliziten Override-Parameter
+  (Default: `choose_piece_size(total_bytes)`), wie in 3.1 beschrieben, aber nicht separat
+  aufgelistet – nötig, damit spätere Phasen (Delta-Update) exakt dieselbe Piece-Größe wie beim
+  letzten Build erzwingen können, falls das je gebraucht wird.
+
 ---
 
 ## Phase 4 – Versionen im Netzwerk + Erst-Download mit Versionswahl
@@ -701,8 +731,8 @@ funktioniert vollständig ohne.
 
 - [x] Phase 0 – libtorrent-API geprüft
 - [x] Phase 1 – Datenmodell, Manifest, ID-Fix, Ordnername-Fix
-- [ ] Phase 2 – Änderungserkennung + Sperre
-- [ ] Phase 3 – Update veröffentlichen
+- [x] Phase 2 – Änderungserkennung + Sperre
+- [x] Phase 3 – Update veröffentlichen
 - [ ] Phase 4 – Versionen im Netzwerk + Versionswahl beim Erst-Download
 - [ ] Phase 5 – Update übernehmen
 - [ ] Phase 6 (optional) – Schnellpfad

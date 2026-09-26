@@ -239,7 +239,11 @@ def _prepare(game_id: str, force: bool = False) -> None:
         log.info("Preparing torrent for %s (%s)", g.name, game_id)
         _set_progress(game_id, 0.05)
 
-        torrent_bytes = create_torrent_data(g.path, on_progress=lambda p: _set_progress(game_id, p))
+        torrent_bytes = create_torrent_data(
+            g.path,
+            files=sorted(g.files) or None,
+            on_progress=lambda p: _set_progress(game_id, p),
+        )
         magnet, info_hash = make_magnet(torrent_bytes)
         g.torrent.magnet = magnet
         g.torrent.info_hash = info_hash

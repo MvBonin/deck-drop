@@ -36,9 +36,11 @@ function CoverImage({ game, mode = 'own' }) {
   return html`<div class="card-cover-placeholder">${initial}</div>`;
 }
 
-export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, disabled, prepProgress }) {
+export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onPublish, disabled, prepProgress }) {
   const unavailable = mode === 'own' && !game.available;
   const size = game.size_bytes ? fmtBytes(game.size_bytes) : '–';
+  const modified = mode === 'own' && game.content_state === 'modified';
+  const versionLabel = game.version_label || `Rev. ${game.revision ?? 1}`;
   const hostPreparing = mode === 'network'
     && !game.has_torrent
     && !game.torrent_prep_error;
@@ -75,6 +77,7 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
       <${CoverImage} game=${game} mode=${mode} />
       <div class="card-body">
         <div class="card-name">${game.name}</div>
+        ${mode === 'own' && html`<div class="card-version">${versionLabel}</div>`}
         <div class="card-meta">
           ${size}
           ${mode === 'network' && game.peer_count != null && html`
@@ -116,6 +119,12 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
         ${prepFailed && html`
           <span class="unavailable-chip" style="margin-bottom:6px">Vorbereitung fehlgeschlagen</span>
         `}
+        ${modified && html`
+          <div class="card-modified-hint">
+            <span class="badge badge-warn">Verändert</span>
+            <span>Wird nicht geteilt</span>
+          </div>
+        `}
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           ${unavailable
             ? html`<span class="unavailable-chip">Nicht verfügbar</span>`
@@ -156,6 +165,14 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
             >✎</button>
           `}
         </div>
+        ${modified && onPublish && html`
+          <button
+            class="btn btn-secondary"
+            style="width:100%;margin-top:6px;font-size:13px"
+            onClick=${e => { e.stopPropagation(); onPublish(); }}
+            tabIndex=${-1}
+          >Update veröffentlichen…</button>
+        `}
       </div>
     </div>`;
 }

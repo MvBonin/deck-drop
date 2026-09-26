@@ -83,6 +83,8 @@ class PeerRegistry:
             if not entry.online:
                 continue
             for game in entry.games:
+                if game.get("content_state") == "modified":
+                    continue
                 if not game.get("has_torrent") and not game.get("torrent_prep_error"):
                     return True
         return False

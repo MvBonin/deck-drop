@@ -107,7 +107,11 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
         logging.getLogger(__name__).warning("libtorrent not available – transfers disabled")
 
-    app_state.init(cfg, library, peer_registry, transfer)
+    from deckdrop.core.content_tracker import ContentTracker
+
+    content_tracker = ContentTracker(cfg, library)
+
+    app_state.init(cfg, library, peer_registry, transfer, content_tracker)
 
     exclude = transfer.incomplete_download_dest_paths() if transfer is not None else frozenset()
     library.reload(cfg, exclude_paths=exclude)
@@ -127,6 +131,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
         from deckdrop.core import torrent_prep
 
         torrent_prep.bind_loop(loop)
+        content_tracker.bind_loop(loop)
         # Startup
         try:
             await discovery.start(cfg, peer_registry.upsert_sync, peer_registry.remove)
@@ -164,6 +169,11 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
                 continue
             if not g.torrent.magnet and not torrent_prep.has_cached_torrent(cfg, g.id):
                 torrent_prep.schedule_prepare(g.id)
+
+        for g in library.all():
+            content_tracker.ensure_baseline(g.id)
+        content_tracker.scan_all_async()
+        content_tracker.start_periodic()
         yield
         # Shutdown – transfers first: writing fast-resume data must happen
         # before the single-instance grace period runs out.

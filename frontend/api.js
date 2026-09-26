@@ -48,6 +48,10 @@ export const api = {
   getPeerComments:  (peerId, gameId)  => get(`/api/peers/${peerId}/games/${gameId}/comments`),
   postComment:      (id, text)        => post(`/api/games/${id}/comments`, { text }),
   searchCover:      (id)              => post(`/api/games/${id}/search_cover`),
+  scanGames:        ()                => post('/api/games/scan'),
+  scanGame:         (id)              => post(`/api/games/${id}/scan`),
+  getChanges:       (id)              => get(`/api/games/${id}/changes`),
+  publishUpdate:    (id, body)        => post(`/api/games/${id}/publish`, body),
 };
 
 export function fmtBytes(n) {

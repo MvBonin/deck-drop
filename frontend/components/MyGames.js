@@ -6,6 +6,7 @@ import { GameCard } from './GameCard.js';
 import { AddGame } from './AddGame.js';
 import { EditGame } from './EditGame.js';
 import { Comments } from './Comments.js';
+import { PublishUpdate } from './PublishUpdate.js';
 import { useGridNav } from '../app.js';
 
 export function MyGames({ wsEvent, showToast }) {
@@ -15,6 +16,7 @@ export function MyGames({ wsEvent, showToast }) {
   const [showAdd, setShowAdd]         = useState(false);
   const [editGame, setEditGame]       = useState(null);
   const [commentsGame, setCommentsGame] = useState(null);
+  const [publishGame, setPublishGame] = useState(null);
   const gridRef = useRef(null);
   useGridNav(gridRef);
 
@@ -37,7 +39,10 @@ export function MyGames({ wsEvent, showToast }) {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api.scanGames().catch(() => {});
+  }, []);
 
   // Reload when a download truly completes (libtorrent finished + full bytes)
   useEffect(() => {
@@ -77,6 +82,30 @@ export function MyGames({ wsEvent, showToast }) {
         ? { ...g, torrent_preparing: false, torrent_prep_error: err }
         : g));
       showToast(`Game-Hashes fehlgeschlagen: ${err}`);
+    }
+    if (wsEvent.event === 'game_content_state') {
+      const { state, summary } = wsEvent.data;
+      setGames(gs => gs.map(g => g.id === id
+        ? { ...g, content_state: state, change_summary: summary ?? g.change_summary, shareable: state === 'clean' && g.has_torrent }
+        : g));
+    }
+    if (wsEvent.event === 'content_publish_progress') {
+      setPrepById(p => ({ ...p, [id]: wsEvent.data.progress ?? 0 }));
+      setGames(gs => gs.map(g => g.id === id
+        ? { ...g, torrent_preparing: true, torrent_prep_progress: wsEvent.data.progress ?? 0 }
+        : g));
+    }
+    if (wsEvent.event === 'content_publish_complete') {
+      setPrepById(p => { const n = { ...p }; delete n[id]; return n; });
+      if (!wsEvent.data.unchanged) {
+        showToast(`Update ${wsEvent.data.version_label || ''} veröffentlicht`.trim());
+      }
+      load();
+    }
+    if (wsEvent.event === 'content_publish_error') {
+      setPrepById(p => { const n = { ...p }; delete n[id]; return n; });
+      showToast(`Veröffentlichen fehlgeschlagen: ${wsEvent.data.error || 'Unbekannter Fehler'}`);
+      load();
     }
   }, [wsEvent]);
 
@@ -144,6 +173,7 @@ export function MyGames({ wsEvent, showToast }) {
                   onAction=${() => onRemove(g)}
                   onEdit=${() => setEditGame(g)}
                   onComments=${() => setCommentsGame(g)}
+                  onPublish=${() => setPublishGame(g)}
                 />
               `)}
             </div>`
@@ -159,5 +189,12 @@ export function MyGames({ wsEvent, showToast }) {
       ${showAdd && html`<${AddGame} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
       ${editGame && html`<${EditGame} game=${editGame} onClose=${() => setEditGame(null)} onSaved=${onSaved} onGameUpdated=${onGameUpdated} />`}
       ${commentsGame && html`<${Comments} game=${commentsGame} onClose=${() => setCommentsGame(null)} />`}
+      ${publishGame && html`
+        <${PublishUpdate}
+          game=${publishGame}
+          onClose=${() => setPublishGame(null)}
+          onPublished=${() => { setPublishGame(null); showToast('Update wird vorbereitet…'); }}
+        />
+      `}
     </div>`;
 }

@@ -2,8 +2,10 @@ import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
+import { PublishUpdate } from './PublishUpdate.js';
 
 export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
+  const [showPublish, setShowPublish] = useState(false);
   const [name, setName]             = useState(game.name || '');
   const [platform, setPlatform]     = useState(game.platform || 'any');
   const [appId, setAppId]           = useState(game.steam_app_id ? String(game.steam_app_id) : '');
@@ -173,6 +175,21 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
             />
           </div>
 
+          <div class="form-group">
+            <label class="form-label">Inhalt</label>
+            <button
+              type="button"
+              class="btn btn-ghost"
+              style="align-self:flex-start"
+              onClick=${() => setShowPublish(true)}
+              disabled=${loading}
+            >Update veröffentlichen…</button>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45">
+              Auch nützlich, um nur neue Dateien (z. B. DLC-Ordner) mit aufzunehmen, ohne dass
+              sich sonst etwas geändert hat.
+            </div>
+          </div>
+
           ${error && html`<p style="color:var(--danger);font-size:13px">${error}</p>`}
 
           <div class="dialog-actions">
@@ -183,5 +200,12 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
           </div>
         </form>
       </div>
+      ${showPublish && html`
+        <${PublishUpdate}
+          game=${game}
+          onClose=${() => setShowPublish(false)}
+          onPublished=${() => setShowPublish(false)}
+        />
+      `}
     </div>`;
 }
