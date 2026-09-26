@@ -44,6 +44,9 @@ export function GameCard({
   const size = game.size_bytes ? fmtBytes(game.size_bytes) : '–';
   const modified = mode === 'own' && game.content_state === 'modified';
   const updating = mode === 'own' && game.content_state === 'updating';
+  // No file hashes yet and no hash running (interrupted, or cancelled for an
+  // update) – not shared until the next check, but not "Verändert" either.
+  const unverified = mode === 'own' && game.content_state === 'unverified';
   const updatePct = Math.round((updateProgress ?? 0) * 100);
   const versionLabel = game.version_label || `Rev. ${game.revision ?? 1}`;
   const hostPreparing = mode === 'network'
@@ -151,6 +154,12 @@ export function GameCard({
             <span>Wird nicht geteilt</span>
           </div>
         `}
+        ${unverified && html`
+          <div class="card-modified-hint">
+            <span class="badge">Noch nicht geprüft</span>
+            <span>Wird nicht geteilt</span>
+          </div>
+        `}
         ${updating && html`
           <div class="card-prep">
             <div class="card-prep-label">Wird aktualisiert… ${updatePct}%</div>
@@ -220,7 +229,7 @@ export function GameCard({
             tabIndex=${-1}
           >Änderungen verwerfen (aus Netzwerk wiederherstellen)</button>
         `}
-        ${game.update_available && !modified && onUpdate && !updating && html`
+        ${game.update_available && onUpdate && !updating && html`
           <button
             class="btn btn-secondary"
             style="width:100%;margin-top:6px;font-size:13px"

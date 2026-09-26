@@ -8,6 +8,8 @@ import { MyGames }    from './components/MyGames.js';
 import { Network }    from './components/Network.js';
 import { Downloads }  from './components/Downloads.js';
 import { Settings }   from './components/Settings.js';
+import { Debug }      from './components/Debug.js';
+import { isDebug, onDebugChange } from './debug.js';
 
 // ── Grid navigation hook ──────────────────────────────────────────
 // Arrow keys move focus between [data-card] elements inside ref.current.
@@ -42,7 +44,13 @@ function App() {
   const [wsEvent, setWsEvent]     = useState(null);
   const [downloads, setDownloads] = useState([]);
   const [toast, setToast]         = useState('');
+  const [debug, setDebugState]    = useState(isDebug());
   const toastTimer = useRef(null);
+
+  useEffect(() => onDebugChange((on) => {
+    setDebugState(on);
+    if (!on) setView(v => (v === 'debug' ? 'settings' : v));
+  }), []);
 
   const ACTIVE_DL = new Set(['queued', 'downloading', 'verifying', 'paused', 'error', 'done']);
 
@@ -124,12 +132,14 @@ function App() {
     network:   html`<${Network}    wsEvent=${wsEvent} showToast=${showToast} onNavigate=${setView} onDownloadStarted=${mergeDownload} />`,
     downloads: html`<${Downloads}  wsEvent=${wsEvent} showToast=${showToast} downloads=${downloads} setDownloads=${setDownloads} />`,
     settings:  html`<${Settings}   showToast=${showToast} />`,
+    debug:     debug ? html`<${Debug} wsEvent=${wsEvent} />` : null,
   };
 
   return html`
     <div id="app-inner">
-      ${views[view]}
-      <${Nav} view=${view} onNav=${setView} dlCount=${activeDlCount} />
+      ${debug && html`<div class="debug-badge" title="Debug-Modus aktiv (?debug=0 zum Ausschalten)">DEBUG</div>`}
+      ${views[view] ?? views.games}
+      <${Nav} view=${view} onNav=${setView} dlCount=${activeDlCount} debug=${debug} />
       <${Toast} message=${toast} />
     </div>`;
 }

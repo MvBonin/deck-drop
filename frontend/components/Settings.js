@@ -2,6 +2,7 @@ import { html } from 'htm/preact';
 import { useState, useEffect } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
+import { isDebug, setDebug } from '../debug.js';
 
 export function Settings({ showToast }) {
   const [cfg, setCfg]         = useState(null);
@@ -10,6 +11,13 @@ export function Settings({ showToast }) {
   const [exiting, setExiting]   = useState(false);
   const [svc, setSvc]           = useState(null);
   const [svcLoading, setSvcLoading] = useState(false);
+  const [debugOn, setDebugOn]   = useState(isDebug());
+
+  const toggleDebug = (on) => {
+    setDebug(on);
+    setDebugOn(on);
+    showToast(on ? 'Debug-Modus an' : 'Debug-Modus aus');
+  };
 
   const load = async () => {
     try {
@@ -206,6 +214,23 @@ export function Settings({ showToast }) {
           </div>
         </div>
       `}
+      <div class="settings-section">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Debug-Modus</div>
+            <div class="settings-row-sub">Zeigt einen Debug-Tab, u. a. warum Dateien gehasht werden (auch per <code>?debug=1</code>)</div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked=${debugOn}
+              onChange=${e => toggleDebug(e.target.checked)}
+              aria-label="Debug-Modus"
+            />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
       <div class="settings-section">
         <button
           type="button"

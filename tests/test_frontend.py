@@ -48,3 +48,51 @@ def test_api_status_endpoint(page: Page, live_server_url: str) -> None:
     data = response.json()
     assert "peer_id" in data
     assert data["name"] == "E2EUser"
+
+
+def test_debug_mode_via_url(page: Page, live_server_url: str) -> None:
+    """`?debug=1` adds a Debug tab listing hash events; `?debug=0` removes it."""
+    nav = page.locator("nav.nav")
+    expect(nav).to_be_visible(timeout=10_000)
+    expect(nav.get_by_text("Debug")).to_have_count(0)
+
+    page.goto(f"{live_server_url}/?debug=1", wait_until="domcontentloaded")
+    nav.get_by_text("Debug").click()
+    expect(page.get_by_text("Hash-Ereignisse (warum wird gehasht?)")).to_be_visible(timeout=10_000)
+
+    # Remembered without the parameter, switched off with ?debug=0.
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    expect(nav.get_by_text("Debug")).to_be_visible(timeout=10_000)
+    page.goto(f"{live_server_url}/?debug=0", wait_until="domcontentloaded")
+    expect(nav).to_be_visible(timeout=10_000)
+    expect(nav.get_by_text("Debug")).to_have_count(0)
+
+
+def test_update_button_visible_while_hashing(page: Page, live_server_url: str) -> None:
+    """A game still hashing its old version must already offer "Aktualisieren…"
+    (the update replaces that hash). /api/games is stubbed – no peer needed."""
+    game = {
+        "id": "dawn1",
+        "name": "Dawnwalker",
+        "version": 1,
+        "size_bytes": 1024,
+        "platform": "linux",
+        "available": True,
+        "added_by": "E2EUser",
+        "updated_at": "2026-09-26T00:00:00+00:00",
+        "has_torrent": True,
+        "torrent_preparing": True,
+        "torrent_prep_progress": 0.3,
+        "content_state": "hashing",
+        "revision": 1,
+        "version_label": "1.0",
+        "update_available": True,
+        "update_version_label": "1.0.5",
+    }
+    page.route("**/api/games", lambda route: route.fulfill(json=[game]))
+    page.goto(live_server_url, wait_until="domcontentloaded")
+
+    card = page.get_by_role("article", name="Dawnwalker")
+    expect(card.get_by_text("Update verfügbar: 1.0.5")).to_be_visible(timeout=10_000)
+    expect(card.get_by_role("button", name="Aktualisieren…")).to_be_visible()
+    expect(card.get_by_text("Game-Hashes berechnen…")).to_be_visible()
