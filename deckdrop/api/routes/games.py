@@ -671,6 +671,9 @@ async def update_game(game_id: str, req: UpdateRequest) -> DownloadOut:
     state = tracker.state(game_id)
     if state in ("hashing", "publishing", "updating"):
         raise HTTPException(409, f"Spiel ist gerade beschäftigt ({state})")
+    # Fresh scan so the Phase 6 fast path never trusts a stale "unchanged"
+    # classification (a file edited since the last periodic scan).
+    await asyncio.to_thread(tracker.scan, game_id)
 
     peers = s.peer_registry.peers_for_version(game_id, req.version_key)
     if not peers:
