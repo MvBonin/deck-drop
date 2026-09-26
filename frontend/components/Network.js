@@ -5,6 +5,7 @@ import { formatApiError } from '../errors.js';
 import { GameCard } from './GameCard.js';
 import { Comments } from './Comments.js';
 import { VersionList } from './VersionList.js';
+import { UpdateGame } from './UpdateGame.js';
 import { useGridNav } from '../app.js';
 
 export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
@@ -15,6 +16,7 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   const [commentsGame, setCommentsGame] = useState(null);
   const [versionGame, setVersionGame] = useState(null); // game whose version picker is open
   const [chosenVersionKey, setChosenVersionKey] = useState(null);
+  const [updateGame, setUpdateGame] = useState(null); // locally installed game to update
   const [query, setQuery]     = useState('');
   const gridRef = useRef(null);
   useGridNav(gridRef);
@@ -63,14 +65,21 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
     }
   };
 
+  const openUpdate = async (game) => {
+    try {
+      // The network entry's fields describe the remote peer, not our local
+      // install – fetch our own game record so UpdateGame's warning/version
+      // header reflect the local content_state.
+      const local = await api.getGame(game.id);
+      setUpdateGame(local);
+    } catch {
+      setUpdateGame(game);
+    }
+  };
+
   const handleAction = (game) => {
     if (game.installed) {
-      // Übernehmen eines Updates (UpdateGame.js) folgt in Phase 5 – bis dahin
-      // führt der Button einfach zu "Meine Spiele", wo der Update-Hinweis liegt.
-      if (game.update_available) {
-        showToast(`Update für ${game.name} verfügbar – siehe "Meine Spiele"`);
-        onNavigate('games');
-      }
+      if (game.update_available) openUpdate(game);
       return;
     }
     if ((game.version_count ?? 1) > 1) {
@@ -184,6 +193,20 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
             </div>
           </div>
         </div>
+      `}
+
+      ${updateGame && html`
+        <${UpdateGame}
+          game=${updateGame}
+          onClose=${() => setUpdateGame(null)}
+          onStarted=${(dl) => {
+            const name = updateGame.name;
+            setUpdateGame(null);
+            onDownloadStarted?.(dl);
+            onNavigate('downloads');
+            showToast(`Update gestartet: ${name}`);
+          }}
+        />
       `}
     </div>`;
 }

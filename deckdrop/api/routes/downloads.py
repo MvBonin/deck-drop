@@ -124,6 +124,8 @@ class DownloadOut(BaseModel):
     phase: str = "queued"  # metadata | checking | verifying | downloading | queued | done
     phase_progress: float = 0.0  # file check progress while phase == "checking"
     stall_seconds: int = 0
+    kind: str = "new"  # "new" | "update" (Phase 5)
+    target_version_label: str = ""  # only set for kind == "update"
 
 
 def _to_out(status: object) -> DownloadOut:

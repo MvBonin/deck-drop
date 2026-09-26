@@ -7,16 +7,19 @@ import { AddGame } from './AddGame.js';
 import { EditGame } from './EditGame.js';
 import { Comments } from './Comments.js';
 import { PublishUpdate } from './PublishUpdate.js';
+import { UpdateGame } from './UpdateGame.js';
 import { useGridNav } from '../app.js';
 
 export function MyGames({ wsEvent, showToast }) {
   const [games, setGames]       = useState([]);
   const [prepById, setPrepById] = useState({});
+  const [updateProgress, setUpdateProgress] = useState({});
   const [loading, setLoading]   = useState(true);
   const [showAdd, setShowAdd]         = useState(false);
   const [editGame, setEditGame]       = useState(null);
   const [commentsGame, setCommentsGame] = useState(null);
   const [publishGame, setPublishGame] = useState(null);
+  const [updateGame, setUpdateGame]   = useState(null);
   const gridRef = useRef(null);
   useGridNav(gridRef);
 
@@ -107,6 +110,16 @@ export function MyGames({ wsEvent, showToast }) {
       showToast(`Veröffentlichen fehlgeschlagen: ${wsEvent.data.error || 'Unbekannter Fehler'}`);
       load();
     }
+    if (wsEvent.event === 'download_progress') {
+      // Harmless to record progress for a non-updating game id here – GameCard
+      // only renders it while content_state === 'updating'.
+      setUpdateProgress(p => ({ ...p, [id]: wsEvent.data.progress ?? 0 }));
+    }
+    if (wsEvent.event === 'game_updated') {
+      setUpdateProgress(p => { const n = { ...p }; delete n[id]; return n; });
+      showToast(`Update ${wsEvent.data.version_label || ''} übernommen`.trim());
+      load();
+    }
   }, [wsEvent]);
 
   // Poll while any game is still preparing (e.g. after page reload)
@@ -146,6 +159,16 @@ export function MyGames({ wsEvent, showToast }) {
     setEditGame(eg => (eg?.id === updated.id ? updated : eg));
   };
 
+  const onRestore = async (game) => {
+    if (!confirm(`Lokale Änderungen an „${game.name}" verwerfen und aus dem Netzwerk wiederherstellen?`)) return;
+    try {
+      await api.startUpdate(game.id, game.content_hash);
+      showToast('Wird aus dem Netzwerk wiederhergestellt…');
+    } catch (err) {
+      showToast(`Fehler: ${formatApiError(err, 'game')}`);
+    }
+  };
+
   return html`
     <div class="view">
       <div class="view-header">
@@ -170,10 +193,13 @@ export function MyGames({ wsEvent, showToast }) {
                   game=${g}
                   mode="own"
                   prepProgress=${prepById[g.id]}
+                  updateProgress=${updateProgress[g.id]}
                   onAction=${() => onRemove(g)}
                   onEdit=${() => setEditGame(g)}
                   onComments=${() => setCommentsGame(g)}
                   onPublish=${() => setPublishGame(g)}
+                  onUpdate=${() => setUpdateGame(g)}
+                  onRestore=${() => onRestore(g)}
                 />
               `)}
             </div>`
@@ -194,6 +220,13 @@ export function MyGames({ wsEvent, showToast }) {
           game=${publishGame}
           onClose=${() => setPublishGame(null)}
           onPublished=${() => { setPublishGame(null); showToast('Update wird vorbereitet…'); }}
+        />
+      `}
+      ${updateGame && html`
+        <${UpdateGame}
+          game=${updateGame}
+          onClose=${() => setUpdateGame(null)}
+          onStarted=${() => { setUpdateGame(null); showToast('Update wird geladen…'); load(); }}
         />
       `}
     </div>`;

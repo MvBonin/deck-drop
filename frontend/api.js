@@ -52,6 +52,8 @@ export const api = {
   scanGame:         (id)              => post(`/api/games/${id}/scan`),
   getChanges:       (id)              => get(`/api/games/${id}/changes`),
   publishUpdate:    (id, body)        => post(`/api/games/${id}/publish`, body),
+  getUpdates:       (id)              => get(`/api/games/${id}/updates`),
+  startUpdate:      (id, versionKey)  => post(`/api/games/${id}/update`, { version_key: versionKey }),
 };
 
 export function fmtBytes(n) {

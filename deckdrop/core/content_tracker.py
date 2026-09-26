@@ -139,6 +139,11 @@ class ContentTracker:
         g = self._library.get(game_id)
         if not g:
             return
+        if self.state(game_id) in _BUSY_STATES:
+            # Never clobber an in-progress update/publish/hash (e.g. the
+            # startup baseline pass over every game must not reset a game
+            # mid-update back to "clean" after a restart – see Phase 5 "5.2.5").
+            return
 
         if not g.files:
             self.set_state(game_id, "hashing")

@@ -725,6 +725,55 @@ Daten; 409 wenn modified. Download-Start mit unbekanntem `version_key` → 404; 
 
 ---
 
+### Abweichungen Phase 5/7 (umgesetzt 2026-09-26)
+
+- **`TransferManager.start_update(game, peers, torrent_bytes, manifest)`** nimmt statt eines
+  einzelnen `peer_id` direkt die Liste der `peer_registry.peers_for_version(...)`-Ergebnisse
+  entgegen (`peers[0]` = Hauptquelle, der Rest wird wie bei `start_download` per
+  `_connect_extra_peers` zusätzlich verbunden). Das spart der Route eine zweite Peer-Auflösung
+  und hält die Signatur konsistent mit `_PersistedRecord.extra_peer_ids`.
+- **Lokaler Vorbereitungsschritt und `add_torrent` laufen synchron im Request-Thread** (wie in
+  3.1/5.2 beschrieben; `apply_local_prep` ist reines `os.replace`/`shutil.copy2`/`os.truncate` auf
+  bereits vorhandene, meist kleine Dateimengen). Für sehr große Bibliotheken mit vielen
+  verschobenen Dateien wäre ein Worker-Thread denkbar, ist aber für den beschriebenen Anwendungsfall
+  (Steam Deck / Heim-LAN) nicht nötig und hätte die Zustandsmaschine unnötig verkompliziert.
+- **`DownloadOut`/`DownloadStatus` bekommen `kind` und `target_version_label` als neue Felder mit
+  Default `"new"`/`""`**, gefüllt aus `_PersistedRecord` in `_paused_status`/`_build_status` – exakt
+  wie in 5.1 gefordert, zusätzlich aber auch im libtorrent-Fehlerzweig von `_build_status` gesetzt
+  (sonst würde ein Fehler während eines Updates in der Downloads-Liste wieder als „neuer Download"
+  erscheinen).
+- **Neustart-Sicherheit**: `ContentTracker.ensure_baseline` bricht jetzt sofort ab, wenn der Zustand
+  bereits `hashing|publishing|updating` ist (vorher nur `scan()` selbst). Grund: `main.py`s
+  Start-Thread `_baseline_all_then_scan` ruft `ensure_baseline` für **jedes** Spiel unconditional
+  auf – ohne diese Sperre hätte der Neustart mitten in einem Update dessen `pending_update`/Zustand
+  auf `clean` zurückgesetzt, obwohl der zugehörige Download (mit `kind="update"`) über
+  `restore_active_downloads()` unverändert weiterläuft. Der bereits persistierte Zustand
+  `"updating"` (aus `ContentTracker._load_all()`) bleibt dadurch über einen Neustart hinweg stabil,
+  ganz ohne eigenen Restore-Code – 5.2.5 verlangt nicht mehr.
+- **Download entfernen bei `kind="update"`**: `TransferManager.remove_download` ignoriert
+  `delete_files` vollständig für Update-Records (nie `shutil.rmtree` auf den Spielordner) und setzt
+  den Content-Zustand zusätzlich aktiv auf `modified` (`_mark_update_removed_modified`), statt den
+  zuvor gesetzten `"updating"`-Zustand einfach hängen zu lassen. Das Downloads-UI blendet den
+  Löschen-Button für `kind === 'update'` aus (5.2.5 verlangt das für die API; das UI-Ausblenden ist
+  eine zusätzliche, im Plan erwähnte Konsequenz aus demselben Punkt).
+- **Phase 7 „Aus Netzwerk wiederherstellen" ergab sich wie erwartet ohne Sonderfall im
+  Update-Ablauf**: `POST /api/games/{id}/update` verbietet nur die Zustände
+  `hashing|publishing|updating`, nicht `modified` – ein `version_key`, der dem eigenen
+  `content_hash` entspricht, läuft durch denselben `start_update`/`_finalize_update`-Pfad. Da
+  `diff_manifests` auf dem zuletzt veröffentlichten Manifest (nicht dem aktuellen Datei-Snapshot)
+  rechnet, liefert es für „gleiche alte wie neue Version" einen leeren Plan; die tatsächliche
+  Reparatur lokal veränderter Bytes übernimmt libtorrents eigener Piece-Hashabgleich beim
+  `add_torrent` ohne `seed_mode` – funktional identisch zu einem normalen Update. Neu ist nur
+  `GameOut.restore_available` (zeigt an, ob ein Peer die eigene, veröffentlichte Revision noch
+  teilt) und der Button „Änderungen verwerfen (aus Netzwerk wiederherstellen)" in `GameCard.js`.
+  Der Decky-Plugin-Teil von Phase 7 ("Updates verfügbar" im Quick-Access-Menü) ist **nicht**
+  umgesetzt.
+- **`GET /api/games/{id}/updates`** holt Manifeste nur für Versionen, die entweder neuer als die
+  lokale Revision sind oder dem eigenen `content_hash` entsprechen (Restore-Fall) – ältere,
+  irrelevante Versionen anderer Peers verursachen keinen unnötigen HTTP-Roundtrip.
+
+---
+
 ## Phase 6 (optional) – Schnellpfad ohne komplette Prüfung
 
 Nur wenn Phase 0 bestätigt, dass `params.have_pieces` funktioniert. Sonst überspringen – Phase 5
@@ -796,9 +845,9 @@ funktioniert vollständig ohne.
 - [x] Phase 2 – Änderungserkennung + Sperre
 - [x] Phase 3 – Update veröffentlichen
 - [x] Phase 4 – Versionen im Netzwerk + Versionswahl beim Erst-Download
-- [ ] Phase 5 – Update übernehmen
+- [x] Phase 5 – Update übernehmen
 - [ ] Phase 6 (optional) – Schnellpfad
-- [ ] Phase 7 (optional) – Wiederherstellen, Decky
+- [x] Phase 7 (optional, teilweise) – Wiederherstellen (Decky-Teil nicht umgesetzt)
 
 ## Verifikation
 

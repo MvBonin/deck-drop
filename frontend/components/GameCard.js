@@ -36,10 +36,15 @@ function CoverImage({ game, mode = 'own' }) {
   return html`<div class="card-cover-placeholder">${initial}</div>`;
 }
 
-export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onPublish, disabled, prepProgress }) {
+export function GameCard({
+  game, mode = 'own', onAction, onEdit, onComments, onPublish, onUpdate, onRestore,
+  disabled, prepProgress, updateProgress,
+}) {
   const unavailable = mode === 'own' && !game.available;
   const size = game.size_bytes ? fmtBytes(game.size_bytes) : '–';
   const modified = mode === 'own' && game.content_state === 'modified';
+  const updating = mode === 'own' && game.content_state === 'updating';
+  const updatePct = Math.round((updateProgress ?? 0) * 100);
   const versionLabel = game.version_label || `Rev. ${game.revision ?? 1}`;
   const hostPreparing = mode === 'network'
     && !game.has_torrent
@@ -83,9 +88,9 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
         ${mode === 'own' && html`
           <div class="card-version">
             ${versionLabel}
-            ${game.update_available && html`
+            ${game.update_available && !updating && html`
               <span class="badge badge-success" style="margin-left:6px">
-                Update: ${game.update_version_label || 'verfügbar'}
+                Update verfügbar: ${game.update_version_label || 'verfügbar'}
               </span>
             `}
           </div>
@@ -137,10 +142,19 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
         ${prepFailed && html`
           <span class="unavailable-chip" style="margin-bottom:6px">Vorbereitung fehlgeschlagen</span>
         `}
-        ${modified && html`
+        ${modified && !updating && html`
           <div class="card-modified-hint">
             <span class="badge badge-warn">Verändert</span>
             <span>Wird nicht geteilt</span>
+          </div>
+        `}
+        ${updating && html`
+          <div class="card-prep">
+            <div class="card-prep-label">Wird aktualisiert… ${updatePct}%</div>
+            <div class="progress-bar" role="progressbar" aria-valuenow=${updatePct} aria-valuemin="0" aria-valuemax="100">
+              <div class="progress-fill" style="width:${updatePct}%"></div>
+            </div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Spiel nicht starten</div>
           </div>
         `}
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -150,7 +164,7 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
                 class=${'btn ' + (mode === 'own' || installedNoUpdate ? 'btn-secondary' : 'btn-primary')}
                 style=${(mode === 'own' || mode === 'network') && (onEdit || onComments) ? 'flex:1' : ''}
                 onClick=${onAction}
-                disabled=${disabled || ownPreparing || hostPreparing || installedNoUpdate}
+                disabled=${disabled || ownPreparing || hostPreparing || installedNoUpdate || updating}
                 tabIndex=${-1}
               >
                 ${hostPreparing
@@ -187,13 +201,29 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
             >✎</button>
           `}
         </div>
-        ${modified && onPublish && html`
+        ${modified && onPublish && !updating && html`
           <button
             class="btn btn-secondary"
             style="width:100%;margin-top:6px;font-size:13px"
             onClick=${e => { e.stopPropagation(); onPublish(); }}
             tabIndex=${-1}
           >Update veröffentlichen…</button>
+        `}
+        ${game.restore_available && onRestore && !updating && html`
+          <button
+            class="btn btn-danger"
+            style="width:100%;margin-top:6px;font-size:13px"
+            onClick=${e => { e.stopPropagation(); onRestore(); }}
+            tabIndex=${-1}
+          >Änderungen verwerfen (aus Netzwerk wiederherstellen)</button>
+        `}
+        ${game.update_available && !modified && onUpdate && !updating && html`
+          <button
+            class="btn btn-secondary"
+            style="width:100%;margin-top:6px;font-size:13px"
+            onClick=${e => { e.stopPropagation(); onUpdate(); }}
+            tabIndex=${-1}
+          >Aktualisieren…</button>
         `}
       </div>
     </div>`;
