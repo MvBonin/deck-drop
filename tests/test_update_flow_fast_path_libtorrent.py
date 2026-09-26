@@ -9,6 +9,7 @@ inspecting the `have_pieces` bitmap.
 from __future__ import annotations
 
 import hashlib
+import os
 import socket
 import time
 from dataclasses import dataclass
@@ -54,8 +55,13 @@ def test_update_uses_have_pieces_and_stays_byte_identical(tmp_path, monkeypatch)
     host_root = tmp_path / "host"
     host_game = host_root / "Big Game"
     host_game.mkdir(parents=True)
-    unchanged = b"A" * (6 * 1024 * 1024)
-    changed_v1 = b"B" * (3 * 1024 * 1024)
+    # A random salt makes this run's torrent (info hash) unique: both
+    # libtorrent tests used to build byte-identical games, so via LSD a
+    # receiver could also find another test's (or process's) seed and fetch
+    # endgame blocks twice – which blew the delta budget below at random.
+    salt = os.urandom(32)
+    unchanged = salt + b"A" * (6 * 1024 * 1024 - len(salt))
+    changed_v1 = salt + b"B" * (3 * 1024 * 1024 - len(salt))
     (host_game / "unchanged.bin").write_bytes(unchanged)
     (host_game / "changed.bin").write_bytes(changed_v1)
 
@@ -251,7 +257,11 @@ def test_update_uses_have_pieces_and_stays_byte_identical(tmp_path, monkeypatch)
         # -- Delta proof: only the truly new/changed data, plus at most one
         # extra piece of slack for the piece straddling the 256-byte edit,
         # was actually downloaded – nowhere near the whole 9.5 MiB game. --
-        downloaded = status.total_payload_download
+        # Only bytes that were actually needed: libtorrent counts blocks it
+        # received twice (endgame) or that failed a hash check separately.
+        downloaded = (
+            status.total_payload_download - status.total_redundant_bytes - status.total_failed_bytes
+        )
         piece_size = 1024 * 1024
         changed_bytes = 256
         budget = len(new_bytes) + changed_bytes + piece_size  # 1 piece slack
