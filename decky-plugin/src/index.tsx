@@ -25,6 +25,7 @@ const enableAutostart = callable<[], Record<string, unknown>>("enable_autostart"
 const disableAutostart = callable<[], Record<string, unknown>>("disable_autostart");
 const startService = callable<[], boolean>("start_service");
 const stopService = callable<[], boolean>("stop_service");
+const getUpdateCount = callable<[], number>("get_update_count");
 
 const StatusDot: FC<{ active: boolean }> = ({ active }) => (
   <span
@@ -42,11 +43,14 @@ const StatusDot: FC<{ active: boolean }> = ({ active }) => (
 
 const Content: FC = () => {
   const [status, setStatus] = useState<Status | null>(null);
+  const [updateCount, setUpdateCount] = useState(0);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      setStatus(await getStatus());
+      const s = await getStatus();
+      setStatus(s);
+      setUpdateCount(s.api_reachable ? await getUpdateCount() : 0);
     } catch (_) {
       // backend not ready yet
     }
@@ -143,6 +147,15 @@ const Content: FC = () => {
           </span>
         </div>
       </PanelSectionRow>
+
+      {/* Updates available */}
+      {updateCount > 0 && (
+        <PanelSectionRow>
+          <span style={{ color: "#4caf50", fontWeight: 500, fontSize: "0.85em" }}>
+            Updates verfügbar: {updateCount}
+          </span>
+        </PanelSectionRow>
+      )}
 
       {/* Autostart toggle */}
       <PanelSectionRow>

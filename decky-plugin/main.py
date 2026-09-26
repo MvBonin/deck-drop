@@ -27,7 +27,7 @@ _SERVICE = "deckdrop"
 _DECKDROP_URL = "http://localhost:7373"
 
 
-def _http(path: str, method: str = "GET") -> dict:
+def _http(path: str, method: str = "GET") -> dict | list:
     req = urllib.request.Request(
         f"{_API_BASE}{path}",
         method=method,
@@ -123,6 +123,16 @@ class Plugin:
 
     async def get_url(self) -> str:
         return _DECKDROP_URL
+
+    async def get_update_count(self) -> int:
+        """Number of own games with an update available in the network
+        (docs/plans/game-updates.md Phase 7 "Decky-Plugin"). Best effort: 0
+        if the API isn't reachable, same as every other status field here.
+        """
+        games = _http("/games")
+        if not isinstance(games, list):
+            return 0
+        return sum(1 for g in games if isinstance(g, dict) and g.get("update_available"))
 
     async def _main(self) -> None:
         logger.info("DeckDrop plugin loaded")

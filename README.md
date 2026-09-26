@@ -12,6 +12,30 @@ LAN-only game sharing for Steam Deck and Linux. Share your game library with fri
 - **Integrity checking** via Blake2b hashes
 - No accounts, no internet required, no DRM
 
+## Updates
+
+DeckDrop tracks the content of every shared game folder and notices when it changes on disk
+(a patch, a manual file edit, ...). A changed game is **locked from sharing** until you publish
+it as an update, so peers never receive half-patched or corrupted data:
+
+1. Patch/change a shared game normally (e.g. on your PC via Steam). DeckDrop's "Meine Spiele"
+   view shows a **"Verändert"** badge on the next scan (periodic, or right after you open the
+   view).
+2. Click **"Update veröffentlichen…"**, give the update an optional version label and note, and
+   confirm. DeckDrop hashes only what changed and re-shares the game.
+3. Other devices that already have this game (PC or Steam Deck) see an **"Update verfügbar"**
+   badge with the version label. Updating downloads only the pieces that actually differ –
+   unchanged files are never re-transferred – and keeps any local-only files (save games, config,
+   shader cache, ...) untouched.
+4. A first-time download instead shows every version currently shared on the network, so you can
+   pick a specific one (e.g. to match a friend's modded copy).
+5. If a game is falsely marked "Verändert" (e.g. after restoring a backup), the same update flow
+   with the game's own version acts as an in-place repair against the network's copy.
+6. On the Steam Deck, the Decky plugin's Quick-Access panel shows how many of your games have an
+   update available, without opening the DeckDrop UI.
+
+No update is ever applied automatically – you always start it from the UI.
+
 ## Requirements
 
 - Python 3.11+

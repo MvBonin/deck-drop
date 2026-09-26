@@ -804,6 +804,84 @@ funktioniert vollständig ohne.
 
 ---
 
+### Abweichungen Phase 6/7 (umgesetzt 2026-09-26)
+
+- **`content.pieces_for_file(file_offset, file_size, piece_length) -> range`** ist wie geplant rein
+  und ohne libtorrent testbar; eine leere Datei (`file_size <= 0`) liefert eine leere `range` (belegt
+  kein Piece), sonst `range(first, last+1)` über die Byte-Grenzen der Datei.
+- **`torrent.build_have_pieces(lt, ti, root, unchanged_rels, changed_rels) -> list[bool]`** ordnet
+  Torrent-Dateien anhand ihres (bereits `retarget_root`-ten) Pfads relativ zum Wurzelordner den
+  Manifest-Relpaths zu (erster Pfadanteil abgeschnitten), überspringt Pad-Dateien
+  (`file_storage.flag_pad_file`) und markiert: `unchanged`-Dateien komplett `True` ohne Lesen;
+  `changed`-Dateien piece-weise per SHA1 der lokalen Bytes (mit Nullen auf `ti.piece_size(p)`
+  aufgefüllt) gegen `ti.hash_for_piece(p)` (liefert in libtorrent 2.1.1 bereits `bytes`, kein
+  `sha1_hash`-Wrapper – bestätigt per Kurztest, siehe `tests/test_build_have_pieces.py`). Jede
+  Ausnahme beim Lesen einer einzelnen Datei lässt nur deren Pieces `False`, ohne die restliche
+  Berechnung abzubrechen.
+- **Der Aufrufer (`TransferManager._apply_have_pieces_fast_path`), nicht `build_have_pieces`
+  selbst, setzt die geforderte Regel „unchanged = gleicher Hash alt/neu **und** vom Tracker nicht
+  als geändert/entfernt gemeldet“ durch:** `diff.unchanged`-Einträge, die im letzten
+  `ContentTracker.change_lists(game_id)` als `changed`/`removed` auftauchen, werden nicht in
+  `unchanged_rels`, sondern in `changed_rels` einsortiert (dort real per Hash verifiziert statt
+  blind vertraut). Zusätzlich werden **verschobene Dateien** (`diff.moved`, per `apply_local_prep`
+  gerade erst umbenannt) ebenfalls in `changed_rels` statt `unchanged_rels` gepackt – falls das
+  `os.replace` aus irgendeinem Grund nicht griff (Quelle fehlte), würde ein blindes „True ohne
+  Lesen“ sonst eine nie tatsächlich vorhandene Datei vortäuschen. Das ist strenger als der reine
+  Plan-Wortlaut ("Pieces aller unchanged Dateien"), aber ohne diese Erweiterung wäre die in 6
+  geforderte Ausnahme für lokal beschädigte Dateien nicht vollständig – siehe Test
+  `test_build_have_pieces_locally_corrupted_unchanged_file_excluded`.
+- **`start_update` läuft jetzt über `asyncio.to_thread` vom Request-Handler aus** (statt wie in
+  Phase 5 synchron im Event-Loop-Thread): Die Phase-6-Piece-Hashes lesen echte Dateibytes, das
+  darf den Event-Loop nicht blockieren. `deckdrop/api/routes/games.py::update_game` wurde dafür
+  angepasst; die Phase-5-Abweichung „Lokaler Vorbereitungsschritt und add_torrent laufen synchron
+  im Request-Thread“ gilt inhaltlich weiter, nur eben in einem Worker-Thread statt im Event-Loop-
+  Thread selbst.
+- **Sicherheitsnetz nach Abschluss (`_finalize_update` → `_verify_update_or_recheck`):**
+  blake2b-Vergleich nur der laut `diff_manifests(old_manifest, target_manifest)` **geänderten und
+  neuen** Dateien (nicht `moved`, die schon durch reines Umbenennen entstehen und keine neuen Bytes
+  bekommen). Bei Abweichung: `handle.force_recheck()`, `_finalize_update` liefert `False` statt
+  `True`. **Wichtig, über den Plan-Wortlaut hinaus:** `_finalize_download`/`_poll_download` geben
+  dieses `False` bis zum Poll-Loop durch (`_finalize_download` liefert jetzt `bool` statt `None`) –
+  ohne diese Änderung hätte `_poll_download` den Download trotz `False` unverändert als „fertig“
+  gemeldet, wäre sofort in `_cleanup_finished` (entfernt den Torrent-Handle aus der Session!) und
+  ggf. `_promote_download_to_seed` (Seeden nicht verifizierter Daten) gelaufen – der gerade erst
+  angestoßene `force_recheck()` hätte dann gar keine laufende Übertragung mehr gehabt, an der er
+  etwas hätte reparieren können. Test: `test_poll_download_does_not_clean_up_or_seed_on_recheck`.
+- **`start_update` selbst bekam einen `try`/`except` um den kompletten "Torrent hinzufügen"-Teil**
+  (ab dem Parsen der Torrent-Bytes bis `add_torrent`): schlägt das fehl (z. B. unbrauchbare
+  Torrent-Bytes, `ti` bleibt `None`), setzt das Tracker-Fix vorher bereits `updating` – ohne diesen
+  Fix wäre das Spiel dauerhaft in `updating` hängen geblieben, obwohl nie ein Download-Handle
+  registriert wurde, der es je hätte auf `clean`/`modified` zurücksetzen können. Der Zustand wird
+  jetzt auf `modified` zurückgesetzt und die Exception weitergereicht (Route antwortet weiterhin
+  mit 500). Test: `test_start_update_reverts_to_modified_on_unusable_torrent`.
+- **Härtung gegen nicht vertrauenswürdige Peer-Pfade (im Rahmen der End-to-End-Durchsicht
+  gefunden, nicht Teil des ursprünglichen Phase-6-Plans, aber unter dieselbe "Stolperfallen"-Regel
+  fallend):** `game.apply_manifest()` filtert `files`/`sizes` jetzt beim Übernehmen eines
+  Peer-Manifests durch `content.safe_join(g.path, rel)` – ein Pfad, der aus dem Spielordner
+  herausführen würde, landet gar nicht erst in `g.files`/`g.sizes`. Zusätzlich nutzen
+  `content.take_snapshot`, `content.compare_snapshot` und `content.plan_local_prep`
+  (Truncate-Zweig) jetzt `safe_join` statt direkter `root / rel`-Verkettung, als zweite
+  Verteidigungslinie für den Fall, dass `files`/`sizes` je auf einem anderen Weg als
+  `apply_manifest` befüllt werden. Tests: `test_apply_manifest_drops_path_traversal_entries`,
+  `test_compare_snapshot_rejects_path_traversal_manifest_entry`,
+  `test_take_snapshot_rejects_path_traversal`.
+- **`_finalize_update`** hat jetzt zusätzlich ein generisches `try`/`except` um den eigentlichen
+  Finalisierungs-Teil (nach der Phase-6-Verifikation): jeder unerwartete Fehler dort (kaputtes
+  Manifest, Dateisystemfehler beim Umbenennen/Löschen, …) setzt den Zustand auf `modified` statt das
+  Spiel für immer in `updating` zu belassen – ein `download`, das laut libtorrent zu 100 % fertig
+  ist, wird nie erneut versuchen, sich selbst zu reparieren, es sei denn, der Nutzer stößt manuell
+  ein neues Update/Publish an.
+- **Decky-Plugin (`decky-plugin/main.py`, `decky-plugin/src/index.tsx`):** neue Backend-Methode
+  `get_update_count()` (fragt `/api/games` ab, zählt `update_available`), im Frontend als
+  `getUpdateCount`-Callable eingebunden und bei jedem `refresh()`-Tick (alle 10 s, wie der
+  bestehende Status) mitgeladen. Zeile „Updates verfügbar: N“ erscheint nur, wenn `N > 0` und die
+  API erreichbar ist (`status.api_reachable`) – kein zusätzlicher Ladezustand nötig, da `getStatus`
+  ohnehin schon zuerst geprüft wird. Der TS-Build wurde nicht ausgeführt (kein Node-Toolchain in
+  dieser Umgebung geprüft) – die Datei wurde stattdessen sorgfältig gegen die bestehenden Muster in
+  derselben Datei geprüft (gleiche `callable<[], T>`-Form, gleiche Panel-Struktur).
+
+---
+
 ## Wiederverwendung (nicht neu erfinden)
 
 - Thread + WS-Emit-Muster: `deckdrop/core/torrent_prep.py` (`_emit`, `_lock`, `bind_loop`).
@@ -846,8 +924,8 @@ funktioniert vollständig ohne.
 - [x] Phase 3 – Update veröffentlichen
 - [x] Phase 4 – Versionen im Netzwerk + Versionswahl beim Erst-Download
 - [x] Phase 5 – Update übernehmen
-- [ ] Phase 6 (optional) – Schnellpfad
-- [x] Phase 7 (optional, teilweise) – Wiederherstellen (Decky-Teil nicht umgesetzt)
+- [x] Phase 6 (optional) – Schnellpfad
+- [x] Phase 7 (optional) – Wiederherstellen + Decky-Plugin
 
 ## Verifikation
 
