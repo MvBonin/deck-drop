@@ -134,9 +134,47 @@ export function Debug({ wsEvent }) {
                 <code>${g.content.summary.changed} geändert · ${g.content.summary.removed} entfernt · ${g.content.summary.added} neu</code>
               `}
               <span>Letzter Scan</span><code>${fmtTime(g.content.last_scan)}</code>
+              ${g.network && html`
+                <span>Im Netzwerk</span>
+                <code>${g.network.same_id
+                  ? `${g.network.same_id} Version(en) mit gleicher ID`
+                  : 'keine Version mit gleicher ID'}${g.network.best_update
+                  ? ` · Update: ${g.network.best_update.version_label || `Rev. ${g.network.best_update.revision}`}`
+                  : ''}</code>
+              `}
             </div>
+            ${g.network && g.network.name_matches.length > 0 && !g.network.same_id && html`
+              <p class="debug-warn">
+                Gleichnamiges Spiel mit anderer ID im Netzwerk (${g.network.name_matches.join(', ')}) –
+                wird nicht als Update erkannt, sondern als neuer Download angeboten.
+              </p>
+            `}
           </div>
         `)}
+      </div>
+
+      <p class="settings-section-title">Netzwerk</p>
+      <div class="settings-section debug-section">
+        ${(data.network_games || []).length === 0
+          ? html`<p class="debug-empty">Keine Spiele von anderen Peers.</p>`
+          : data.network_games.map(n => html`
+            <div class="debug-game-row" key=${n.id + n.version_key}>
+              <div class="debug-event-head">
+                <strong>${n.name}</strong>
+                <span class="debug-kind">${n.version_label || `Rev. ${n.revision}`}</span>
+                ${n.installed
+                  ? html`<span class="debug-kind debug-state-clean">installiert</span>`
+                  : html`<span class="debug-kind">nicht installiert</span>`}
+                ${n.update_available && html`<span class="debug-kind debug-kind-piece_check">Update</span>`}
+              </div>
+              <div class="debug-kv">
+                <span>ID</span><code>${n.id}</code>
+                <span>Peers</span><code>${n.peers.join(', ') || '–'}</code>
+                <span>Teilbar</span><code>${n.shareable ? 'ja' : 'nein'} · Torrent ${n.has_torrent ? 'ja' : 'nein'}</code>
+                <span>Größe</span><code>${fmtBytes(n.size_bytes)}</code>
+              </div>
+            </div>
+          `)}
       </div>
 
       <p class="settings-section-title">Downloads</p>

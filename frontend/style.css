@@ -668,10 +668,19 @@ a { color: inherit; text-decoration: none; }
 .debug-kind-manifest_check, .debug-state-clean {
   background: rgba(76, 175, 130, 0.18); color: var(--success);
 }
-.debug-kind-piece_check, .debug-kind-torrent_build, .debug-state-updating {
+.debug-kind-piece_check, .debug-kind-torrent_build, .debug-kind-relink, .debug-state-updating {
   background: rgba(108, 142, 247, 0.18); color: var(--accent);
 }
 .debug-reason { color: var(--text-dim); margin-top: 4px; line-height: 1.4; }
+.debug-warn {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warn);
+  background: rgba(240, 160, 48, 0.12);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
 .debug-reason code, .debug-kv code, .debug-files code {
   font-size: 11px;
   color: var(--text-dim);

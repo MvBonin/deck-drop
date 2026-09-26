@@ -187,6 +187,39 @@ class ContentTracker:
         cancel.set()
         return done.wait(timeout)
 
+    def rename_game(self, old_id: str, new_id: str) -> None:
+        """Move the tracker state from `old_id` to `new_id` (legacy ID relink).
+
+        A baseline hash still running under the old ID is stopped first:
+        it would otherwise save the game with its old ID when done and undo
+        the relink. The game then becomes "unverified" under the new ID
+        (update option visible right away); the next scan redoes the hash.
+        """
+        if old_id == new_id:
+            return
+        hashing = self.state(old_id) == "hashing"
+        self.cancel_hash(old_id)
+        try:
+            with self._lock:
+                entry = self._entries.pop(old_id, None)
+            old_path = self._state_path(old_id)
+            if entry is None and not hashing:
+                return
+            entry = dict(entry or {})
+            if hashing or entry.get("state") == "hashing":
+                entry["state"] = "unverified"
+                entry.pop("hash_progress", None)
+                entry["pending_hash_reason"] = "relinked"
+            if new_id not in self._entries:
+                self._entries[new_id] = entry
+                self._save_entry(new_id, entry)
+            try:
+                old_path.unlink(missing_ok=True)
+            except OSError as exc:
+                log.warning("Could not remove content state of %s: %s", old_id, exc)
+        finally:
+            self.release_hash_hold(old_id)
+
     def release_hash_hold(self, game_id: str) -> None:
         with self._lock:
             self._hash_hold.discard(game_id)
