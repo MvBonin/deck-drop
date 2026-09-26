@@ -70,6 +70,10 @@ function endSprintDetail(dl, pct) {
 }
 
 function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
+  const isUpdate = dl.kind === 'update';
+  const displayName = isUpdate
+    ? `Update: ${dl.game_name} → ${dl.target_version_label || '?'}`
+    : dl.game_name;
   const pct = progressPct(dl);
   const pctLabel = formatPct(pct);
   const fillPct = Math.min(100, pct);
@@ -92,7 +96,7 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
     <div class="download-row" tabIndex=${0} data-card>
       <div class="download-header">
         <div>
-          <div class="download-name">${dl.game_name}</div>
+          <div class="download-name">${displayName}</div>
           <div class="download-peer">${dl.status === 'done' || dl.status === 'seeding'
             ? `Ursprünglich von ${dl.peer_name}`
             : `von ${dl.peer_name}`}</div>
@@ -288,16 +292,20 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
           <div class="dialog">
             <div class="dialog-title">„${removeTarget.game_name}" entfernen?</div>
             <p class="dialog-text">
-              Der Download wird aus der Liste entfernt.
+              ${removeTarget.kind === 'update'
+                ? 'Das Update wird abgebrochen. Der Spielordner bleibt erhalten (gemischter Stand) – die Karte bietet danach erneut „Update übernehmen" an.'
+                : 'Der Download wird aus der Liste entfernt.'}
               ${removeTarget.dest_path ? html`<br/><br/><code style="font-size:11px;color:var(--text-dim)">${removeTarget.dest_path}</code>` : null}
             </p>
             <div class="dialog-actions" style="flex-direction:column;align-items:stretch;gap:8px">
               <button type="button" class="btn btn-ghost" onClick=${() => confirmRemove(false)}>
                 Nur aus Liste entfernen
               </button>
-              <button type="button" class="btn btn-danger" onClick=${() => confirmRemove(true)}>
-                Entfernen und Ordner löschen
-              </button>
+              ${removeTarget.kind !== 'update' && html`
+                <button type="button" class="btn btn-danger" onClick=${() => confirmRemove(true)}>
+                  Entfernen und Ordner löschen
+                </button>
+              `}
               <button type="button" class="btn btn-ghost" onClick=${() => setRemoveTarget(null)}>
                 Abbrechen
               </button>

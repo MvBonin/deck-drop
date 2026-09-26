@@ -5,6 +5,21 @@ from __future__ import annotations
 import argparse
 
 
+def _baseline_all_then_scan(library: object, content_tracker: object) -> None:
+    """Baseline every game, then kick off a scan pass – run in a background thread.
+
+    Baseline hashing (full blake2b of every file for a game never hashed
+    before) can take a long time on a large library / slow SD card. Running
+    it synchronously in the uvicorn lifespan would delay the server accepting
+    any request until it's done. Each game stays in state "hashing" (not
+    shareable) via ContentTracker.ensure_baseline until its own pass
+    completes, so nothing is served half-hashed in the meantime.
+    """
+    for g in library.all():  # type: ignore[attr-defined]
+        content_tracker.ensure_baseline(g.id)  # type: ignore[attr-defined]
+    content_tracker.scan_all_async()  # type: ignore[attr-defined]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="deckdrop",
@@ -44,6 +59,7 @@ def main() -> None:
 def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = False) -> None:
     import atexit
     import os
+    import threading
     from contextlib import asynccontextmanager
 
     import uvicorn
@@ -107,7 +123,11 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
         logging.getLogger(__name__).warning("libtorrent not available – transfers disabled")
 
-    app_state.init(cfg, library, peer_registry, transfer)
+    from deckdrop.core.content_tracker import ContentTracker
+
+    content_tracker = ContentTracker(cfg, library)
+
+    app_state.init(cfg, library, peer_registry, transfer, content_tracker)
 
     exclude = transfer.incomplete_download_dest_paths() if transfer is not None else frozenset()
     library.reload(cfg, exclude_paths=exclude)
@@ -127,6 +147,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
         from deckdrop.core import torrent_prep
 
         torrent_prep.bind_loop(loop)
+        content_tracker.bind_loop(loop)
         # Startup
         try:
             await discovery.start(cfg, peer_registry.upsert_sync, peer_registry.remove)
@@ -164,6 +185,14 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
                 continue
             if not g.torrent.magnet and not torrent_prep.has_cached_torrent(cfg, g.id):
                 torrent_prep.schedule_prepare(g.id)
+
+        threading.Thread(
+            target=_baseline_all_then_scan,
+            args=(library, content_tracker),
+            daemon=True,
+            name="content-baseline-startup",
+        ).start()
+        content_tracker.start_periodic()
         yield
         # Shutdown – transfers first: writing fast-resume data must happen
         # before the single-instance grace period runs out.

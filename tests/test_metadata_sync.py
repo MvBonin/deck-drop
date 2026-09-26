@@ -168,7 +168,7 @@ async def test_peer_metadata_sync_applies_higher_version(tmp_path):
         respx.get(f"http://192.168.1.10:7373/api/games/{info.id}/comments").mock(
             return_value=httpx.Response(200, json=[])
         )
-        await registry._sync_from_peer([remote_game], "192.168.1.10", 7373)
+        await registry._sync_from_peer("peer-x", [remote_game], "192.168.1.10", 7373)
 
     local = library.get(info.id)
     assert local.description == "Updated by creator"
@@ -214,7 +214,7 @@ async def test_peer_metadata_sync_ignores_older_version(tmp_path):
         respx.get(f"http://192.168.1.10:7373/api/games/{info.id}/comments").mock(
             return_value=httpx.Response(200, json=[])
         )
-        await registry._sync_from_peer([remote_game], "192.168.1.10", 7373)
+        await registry._sync_from_peer("peer-x", [remote_game], "192.168.1.10", 7373)
 
     local = library.get(info.id)
     assert local.description == "My local description"

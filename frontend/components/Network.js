@@ -4,6 +4,8 @@ import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { GameCard } from './GameCard.js';
 import { Comments } from './Comments.js';
+import { VersionList } from './VersionList.js';
+import { UpdateGame } from './UpdateGame.js';
 import { useGridNav } from '../app.js';
 
 export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
@@ -12,6 +14,9 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(null); // game_id being started
   const [commentsGame, setCommentsGame] = useState(null);
+  const [versionGame, setVersionGame] = useState(null); // game whose version picker is open
+  const [chosenVersionKey, setChosenVersionKey] = useState(null);
+  const [updateGame, setUpdateGame] = useState(null); // locally installed game to update
   const [query, setQuery]     = useState('');
   const gridRef = useRef(null);
   useGridNav(gridRef);
@@ -44,11 +49,13 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
     return () => clearInterval(t);
   }, [games]);
 
-  const startDownload = async (game) => {
+  const startDownload = async (game, versionKey) => {
     setStarting(`${game.id}:${game.peer_id}`);
     onNavigate('downloads');
     try {
-      const dl = await api.startDl({ peer_id: game.peer_id, game_id: game.id });
+      const body = { peer_id: game.peer_id, game_id: game.id };
+      if (versionKey) body.version_key = versionKey;
+      const dl = await api.startDl(body);
       onDownloadStarted?.(dl);
       showToast(`Download gestartet: ${game.name}`);
     } catch (err) {
@@ -56,6 +63,31 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
     } finally {
       setStarting(null);
     }
+  };
+
+  const openUpdate = async (game) => {
+    try {
+      // The network entry's fields describe the remote peer, not our local
+      // install – fetch our own game record so UpdateGame's warning/version
+      // header reflect the local content_state.
+      const local = await api.getGame(game.id);
+      setUpdateGame(local);
+    } catch {
+      setUpdateGame(game);
+    }
+  };
+
+  const handleAction = (game) => {
+    if (game.installed) {
+      if (game.update_available) openUpdate(game);
+      return;
+    }
+    if ((game.version_count ?? 1) > 1) {
+      setChosenVersionKey(game.versions?.[0]?.version_key ?? null);
+      setVersionGame(game);
+      return;
+    }
+    startDownload(game, game.versions?.[0]?.version_key);
   };
 
   const onlineCount = peers.length;
@@ -115,7 +147,7 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
                     game=${g}
                     mode="network"
                     disabled=${starting === `${g.id}:${g.peer_id}`}
-                    onAction=${() => startDownload(g)}
+                    onAction=${() => handleAction(g)}
                     onComments=${() => setCommentsGame(g)}
                   />
                 `)}
@@ -128,6 +160,52 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
           peerId=${commentsGame.peer_id}
           readOnly
           onClose=${() => setCommentsGame(null)}
+        />
+      `}
+
+      ${versionGame && html`
+        <div
+          class="overlay"
+          onClick=${e => e.target === e.currentTarget && setVersionGame(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Version wählen"
+        >
+          <div class="dialog">
+            <div class="dialog-title">Version wählen – ${versionGame.name}</div>
+            <${VersionList}
+              versions=${versionGame.versions || []}
+              value=${chosenVersionKey}
+              onChange=${setChosenVersionKey}
+            />
+            <div class="dialog-actions">
+              <button class="btn btn-ghost" onClick=${() => setVersionGame(null)}>Abbrechen</button>
+              <button
+                class="btn btn-primary"
+                disabled=${!chosenVersionKey}
+                onClick=${() => {
+                  const g = versionGame;
+                  const key = chosenVersionKey;
+                  setVersionGame(null);
+                  startDownload(g, key);
+                }}
+              >Diese Version laden</button>
+            </div>
+          </div>
+        </div>
+      `}
+
+      ${updateGame && html`
+        <${UpdateGame}
+          game=${updateGame}
+          onClose=${() => setUpdateGame(null)}
+          onStarted=${(dl) => {
+            const name = updateGame.name;
+            setUpdateGame(null);
+            onDownloadStarted?.(dl);
+            onNavigate('downloads');
+            showToast(`Update gestartet: ${name}`);
+          }}
         />
       `}
     </div>`;

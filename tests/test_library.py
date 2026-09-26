@@ -6,7 +6,7 @@ import pytest
 
 from deckdrop.core import config as cfg_mod
 from deckdrop.core import game as game_mod
-from deckdrop.core.library import Library
+from deckdrop.core.library import Library, relink_game_id
 
 
 @pytest.fixture
@@ -99,6 +99,45 @@ def test_add_and_remove(cfg):
 
     lib.remove(info.id)
     assert lib.get(info.id) is None
+
+
+def test_relink_game_id_updates_toml_cache_and_library(cfg, tmp_path):
+    cfg._data["paths"]["torrent_cache"] = str(tmp_path / "torrents")
+    game_dir = cfg.download_dir / "SomeGame"
+    _make_game(game_dir, "SomeGame")
+
+    lib = Library()
+    lib.reload(cfg)
+    info = lib.all()[0]
+    old_id = info.id
+
+    cfg.torrent_cache.mkdir(parents=True, exist_ok=True)
+    (cfg.torrent_cache / f"{old_id}.torrent").write_bytes(b"fake-torrent")
+    cfg.content_state_dir.mkdir(parents=True, exist_ok=True)
+    (cfg.content_state_dir / f"{old_id}.json").write_text("{}", encoding="utf-8")
+
+    changed = relink_game_id(cfg, lib, info, "newid123")
+
+    assert changed is True
+    assert info.id == "newid123"
+    assert lib.get("newid123") is info
+    assert lib.get(old_id) is None
+
+    reloaded = game_mod.load_from_path(game_dir)
+    assert reloaded.id == "newid123"
+    assert (cfg.torrent_cache / "newid123.torrent").exists()
+    assert not (cfg.torrent_cache / f"{old_id}.torrent").exists()
+    assert (cfg.content_state_dir / "newid123.json").exists()
+
+
+def test_relink_game_id_same_id_is_noop(cfg, tmp_path):
+    game_dir = cfg.download_dir / "SomeGame"
+    _make_game(game_dir, "SomeGame")
+    lib = Library()
+    lib.reload(cfg)
+    info = lib.all()[0]
+
+    assert relink_game_id(cfg, lib, info, info.id) is False
 
 
 def test_duplicate_game_id_last_wins(cfg, tmp_path):

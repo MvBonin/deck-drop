@@ -36,13 +36,23 @@ function CoverImage({ game, mode = 'own' }) {
   return html`<div class="card-cover-placeholder">${initial}</div>`;
 }
 
-export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, disabled, prepProgress }) {
+export function GameCard({
+  game, mode = 'own', onAction, onEdit, onComments, onPublish, onUpdate, onRestore,
+  disabled, prepProgress, updateProgress,
+}) {
   const unavailable = mode === 'own' && !game.available;
   const size = game.size_bytes ? fmtBytes(game.size_bytes) : '–';
+  const modified = mode === 'own' && game.content_state === 'modified';
+  const updating = mode === 'own' && game.content_state === 'updating';
+  const updatePct = Math.round((updateProgress ?? 0) * 100);
+  const versionLabel = game.version_label || `Rev. ${game.revision ?? 1}`;
   const hostPreparing = mode === 'network'
     && !game.has_torrent
     && !game.torrent_prep_error;
   const ownPreparing = mode === 'own' && game.torrent_preparing;
+  const installedNoUpdate = mode === 'network' && game.installed && !game.update_available;
+  const installedWithUpdate = mode === 'network' && game.installed && game.update_available;
+  const versionCount = mode === 'network' ? (game.version_count ?? 1) : 1;
   const prepPct = Math.round(
     (prepProgress ?? game.torrent_prep_progress ?? 0) * 100,
   );
@@ -75,6 +85,19 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
       <${CoverImage} game=${game} mode=${mode} />
       <div class="card-body">
         <div class="card-name">${game.name}</div>
+        ${mode === 'own' && html`
+          <div class="card-version">
+            ${versionLabel}
+            ${game.update_available && !updating && html`
+              <span class="badge badge-success" style="margin-left:6px">
+                Update verfügbar: ${game.update_version_label || 'verfügbar'}
+              </span>
+            `}
+          </div>
+        `}
+        ${mode === 'network' && versionCount > 1 && html`
+          <div class="card-version"><span class="badge">${versionCount} Versionen</span></div>
+        `}
         <div class="card-meta">
           ${size}
           ${mode === 'network' && game.peer_count != null && html`
@@ -85,6 +108,9 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
           `}
           ${mode === 'own' && game.source_peer_name && html`
             · <span>von ${game.source_peer_name}</span>
+          `}
+          ${game.created_by && html`
+            · <span>Erstellt von ${game.created_by}</span>
           `}
           ${protondbUrl && html`
             · <a
@@ -116,14 +142,29 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
         ${prepFailed && html`
           <span class="unavailable-chip" style="margin-bottom:6px">Vorbereitung fehlgeschlagen</span>
         `}
+        ${modified && !updating && html`
+          <div class="card-modified-hint">
+            <span class="badge badge-warn">Verändert</span>
+            <span>Wird nicht geteilt</span>
+          </div>
+        `}
+        ${updating && html`
+          <div class="card-prep">
+            <div class="card-prep-label">Wird aktualisiert… ${updatePct}%</div>
+            <div class="progress-bar" role="progressbar" aria-valuenow=${updatePct} aria-valuemin="0" aria-valuemax="100">
+              <div class="progress-fill" style="width:${updatePct}%"></div>
+            </div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Spiel nicht starten</div>
+          </div>
+        `}
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           ${unavailable
             ? html`<span class="unavailable-chip">Nicht verfügbar</span>`
             : html`<button
-                class=${'btn ' + (mode === 'own' ? 'btn-secondary' : 'btn-primary')}
+                class=${'btn ' + (mode === 'own' || installedNoUpdate ? 'btn-secondary' : 'btn-primary')}
                 style=${(mode === 'own' || mode === 'network') && (onEdit || onComments) ? 'flex:1' : ''}
                 onClick=${onAction}
-                disabled=${disabled || ownPreparing || hostPreparing}
+                disabled=${disabled || ownPreparing || hostPreparing || installedNoUpdate || updating}
                 tabIndex=${-1}
               >
                 ${hostPreparing
@@ -132,7 +173,11 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
                     ? '⏳ Hashes…'
                     : mode === 'own'
                       ? '✓ Geteilt'
-                      : '↓ Laden'}
+                      : installedWithUpdate
+                        ? '⟳ Update'
+                        : installedNoUpdate
+                          ? '✓ Installiert'
+                          : '↓ Laden'}
               </button>`
           }
           ${(mode === 'own' || mode === 'network') && onComments && html`
@@ -156,6 +201,30 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, dis
             >✎</button>
           `}
         </div>
+        ${modified && onPublish && !updating && html`
+          <button
+            class="btn btn-secondary"
+            style="width:100%;margin-top:6px;font-size:13px"
+            onClick=${e => { e.stopPropagation(); onPublish(); }}
+            tabIndex=${-1}
+          >Update veröffentlichen…</button>
+        `}
+        ${game.restore_available && onRestore && !updating && html`
+          <button
+            class="btn btn-danger"
+            style="width:100%;margin-top:6px;font-size:13px"
+            onClick=${e => { e.stopPropagation(); onRestore(); }}
+            tabIndex=${-1}
+          >Änderungen verwerfen (aus Netzwerk wiederherstellen)</button>
+        `}
+        ${game.update_available && !modified && onUpdate && !updating && html`
+          <button
+            class="btn btn-secondary"
+            style="width:100%;margin-top:6px;font-size:13px"
+            onClick=${e => { e.stopPropagation(); onUpdate(); }}
+            tabIndex=${-1}
+          >Aktualisieren…</button>
+        `}
       </div>
     </div>`;
 }

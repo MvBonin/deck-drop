@@ -6,15 +6,20 @@ import { GameCard } from './GameCard.js';
 import { AddGame } from './AddGame.js';
 import { EditGame } from './EditGame.js';
 import { Comments } from './Comments.js';
+import { PublishUpdate } from './PublishUpdate.js';
+import { UpdateGame } from './UpdateGame.js';
 import { useGridNav } from '../app.js';
 
 export function MyGames({ wsEvent, showToast }) {
   const [games, setGames]       = useState([]);
   const [prepById, setPrepById] = useState({});
+  const [updateProgress, setUpdateProgress] = useState({});
   const [loading, setLoading]   = useState(true);
   const [showAdd, setShowAdd]         = useState(false);
   const [editGame, setEditGame]       = useState(null);
   const [commentsGame, setCommentsGame] = useState(null);
+  const [publishGame, setPublishGame] = useState(null);
+  const [updateGame, setUpdateGame]   = useState(null);
   const gridRef = useRef(null);
   useGridNav(gridRef);
 
@@ -37,7 +42,10 @@ export function MyGames({ wsEvent, showToast }) {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api.scanGames().catch(() => {});
+  }, []);
 
   // Reload when a download truly completes (libtorrent finished + full bytes)
   useEffect(() => {
@@ -78,6 +86,40 @@ export function MyGames({ wsEvent, showToast }) {
         : g));
       showToast(`Game-Hashes fehlgeschlagen: ${err}`);
     }
+    if (wsEvent.event === 'game_content_state') {
+      const { state, summary } = wsEvent.data;
+      setGames(gs => gs.map(g => g.id === id
+        ? { ...g, content_state: state, change_summary: summary ?? g.change_summary, shareable: state === 'clean' && g.has_torrent }
+        : g));
+    }
+    if (wsEvent.event === 'content_publish_progress') {
+      setPrepById(p => ({ ...p, [id]: wsEvent.data.progress ?? 0 }));
+      setGames(gs => gs.map(g => g.id === id
+        ? { ...g, torrent_preparing: true, torrent_prep_progress: wsEvent.data.progress ?? 0 }
+        : g));
+    }
+    if (wsEvent.event === 'content_publish_complete') {
+      setPrepById(p => { const n = { ...p }; delete n[id]; return n; });
+      if (!wsEvent.data.unchanged) {
+        showToast(`Update ${wsEvent.data.version_label || ''} veröffentlicht`.trim());
+      }
+      load();
+    }
+    if (wsEvent.event === 'content_publish_error') {
+      setPrepById(p => { const n = { ...p }; delete n[id]; return n; });
+      showToast(`Veröffentlichen fehlgeschlagen: ${wsEvent.data.error || 'Unbekannter Fehler'}`);
+      load();
+    }
+    if (wsEvent.event === 'download_progress') {
+      // Harmless to record progress for a non-updating game id here – GameCard
+      // only renders it while content_state === 'updating'.
+      setUpdateProgress(p => ({ ...p, [id]: wsEvent.data.progress ?? 0 }));
+    }
+    if (wsEvent.event === 'game_updated') {
+      setUpdateProgress(p => { const n = { ...p }; delete n[id]; return n; });
+      showToast(`Update ${wsEvent.data.version_label || ''} übernommen`.trim());
+      load();
+    }
   }, [wsEvent]);
 
   // Poll while any game is still preparing (e.g. after page reload)
@@ -117,6 +159,16 @@ export function MyGames({ wsEvent, showToast }) {
     setEditGame(eg => (eg?.id === updated.id ? updated : eg));
   };
 
+  const onRestore = async (game) => {
+    if (!confirm(`Lokale Änderungen an „${game.name}" verwerfen und aus dem Netzwerk wiederherstellen?`)) return;
+    try {
+      await api.startUpdate(game.id, game.content_hash);
+      showToast('Wird aus dem Netzwerk wiederhergestellt…');
+    } catch (err) {
+      showToast(`Fehler: ${formatApiError(err, 'game')}`);
+    }
+  };
+
   return html`
     <div class="view">
       <div class="view-header">
@@ -141,9 +193,13 @@ export function MyGames({ wsEvent, showToast }) {
                   game=${g}
                   mode="own"
                   prepProgress=${prepById[g.id]}
+                  updateProgress=${updateProgress[g.id]}
                   onAction=${() => onRemove(g)}
                   onEdit=${() => setEditGame(g)}
                   onComments=${() => setCommentsGame(g)}
+                  onPublish=${() => setPublishGame(g)}
+                  onUpdate=${() => setUpdateGame(g)}
+                  onRestore=${() => onRestore(g)}
                 />
               `)}
             </div>`
@@ -159,5 +215,19 @@ export function MyGames({ wsEvent, showToast }) {
       ${showAdd && html`<${AddGame} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
       ${editGame && html`<${EditGame} game=${editGame} onClose=${() => setEditGame(null)} onSaved=${onSaved} onGameUpdated=${onGameUpdated} />`}
       ${commentsGame && html`<${Comments} game=${commentsGame} onClose=${() => setCommentsGame(null)} />`}
+      ${publishGame && html`
+        <${PublishUpdate}
+          game=${publishGame}
+          onClose=${() => setPublishGame(null)}
+          onPublished=${() => { setPublishGame(null); showToast('Update wird vorbereitet…'); }}
+        />
+      `}
+      ${updateGame && html`
+        <${UpdateGame}
+          game=${updateGame}
+          onClose=${() => setUpdateGame(null)}
+          onStarted=${() => { setUpdateGame(null); showToast('Update wird geladen…'); load(); }}
+        />
+      `}
     </div>`;
 }

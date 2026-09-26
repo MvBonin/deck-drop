@@ -61,7 +61,37 @@ def test_all_network_games_injects_peer_info(registry):
     assert games[0]["peer_count"] == 1
 
 
-def test_all_network_games_groups_same_title(registry):
+def test_all_network_games_groups_same_id(registry):
+    """Games are grouped by stable id (Phase 4), not name+size."""
+    registry.upsert_sync("p1", "Alice", "192.168.1.10", 7373)
+    registry.upsert_sync("p2", "Bob", "192.168.1.11", 7373)
+    registry.get("p1").games = [
+        {
+            "id": "a1",
+            "name": "Portal 2",
+            "size_bytes": 500,
+            "has_torrent": True,
+            "content_hash": "hash1",
+        }
+    ]
+    registry.get("p2").games = [
+        {
+            "id": "a1",
+            "name": "Portal 2",
+            "size_bytes": 500,
+            "has_torrent": True,
+            "content_hash": "hash1",
+        }
+    ]
+    games = registry.all_network_games()
+    assert len(games) == 1
+    assert games[0]["peer_count"] == 2
+    assert set(games[0]["peer_names"]) == {"Alice", "Bob"}
+    assert games[0]["version_count"] == 1
+
+
+def test_all_network_games_different_ids_not_grouped(registry):
+    """Same name+size but a different id (e.g. two unrelated games) stay separate."""
     registry.upsert_sync("p1", "Alice", "192.168.1.10", 7373)
     registry.upsert_sync("p2", "Bob", "192.168.1.11", 7373)
     registry.get("p1").games = [
@@ -71,9 +101,7 @@ def test_all_network_games_groups_same_title(registry):
         {"id": "b1", "name": "Portal 2", "size_bytes": 500, "has_torrent": False}
     ]
     games = registry.all_network_games()
-    assert len(games) == 1
-    assert games[0]["peer_count"] == 2
-    assert set(games[0]["peer_names"]) == {"Alice", "Bob"}
+    assert len(games) == 2
 
 
 def test_all_network_games_excludes_offline(registry):
@@ -162,3 +190,48 @@ def test_games_changed_detects_has_torrent(registry):
     old = [{"id": "a", "has_torrent": False}]
     new = [{"id": "a", "has_torrent": True}]
     assert PeerRegistry._games_changed(old, new) is True
+
+
+@pytest.mark.asyncio
+async def test_sync_from_peer_relinks_legacy_id(tmp_path, monkeypatch, registry):
+    """A previously-downloaded game with the old (wrong) ID gets relinked."""
+    from deckdrop.api import state as app_state
+    from deckdrop.core import config as cfg_mod
+    from deckdrop.core import game as game_mod
+    from deckdrop.core.library import Library
+
+    monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
+    cfg = cfg_mod.load()
+    cfg.download_dir = tmp_path / "games"
+    cfg_mod.save(cfg)
+
+    game_dir = cfg.download_dir / "Stardew_Valley"
+    game_dir.mkdir(parents=True)
+    info = game_mod.create_new(game_dir, "Stardew Valley", added_by="deckuser")
+    info.origin.peer_id = "peer1"
+    info.origin.peer_name = "PC1"
+    info.size_bytes = 1000
+    game_mod.save(info)
+    old_id = info.id
+
+    lib = Library()
+    lib.reload(cfg)
+    app_state.init(cfg, lib)
+
+    registry.set_library(lib)
+
+    remote_game = {
+        "id": "hostid123",
+        "name": "Stardew Valley",
+        "size_bytes": 1000,
+        "version": 1,
+    }
+
+    with respx.mock:
+        respx.get("http://192.168.1.10:7373/api/games/hostid123/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        await registry._sync_from_peer("peer1", [remote_game], "192.168.1.10", 7373)
+
+    assert lib.get("hostid123") is not None
+    assert lib.get(old_id) is None

@@ -3,6 +3,38 @@
 
 libtorrent is an optional dependency. All public functions raise
 RuntimeError with a clear message if it's not installed.
+
+Phase 0 findings (libtorrent 2.1.1.0, pip wheel, verified 2026-09-26 in a
+throwaway venv – see docs/plans/game-updates.md "Phase 0"):
+
+- `lt.create_torrent(fs, piece_size)` builds hybrid v1+v2 torrents by default:
+  `torrent_info.info_hashes().has_v2()` is True (has_v1() is also True).
+  Confirmed. (The 2-arg constructor from `file_storage` is flagged
+  DeprecationWarning in 2.1.1 but still works; a future libtorrent release may
+  need the `torrent_creator`-based API instead.)
+- Pad files are inserted between non-aligned files and flagged:
+  `fs.file_flags(i) & lt.file_storage.flag_pad_file`. Confirmed.
+- Every non-pad file starts on a piece boundary:
+  `fs.file_offset(i) % ti.piece_length() == 0`. Confirmed (pad files
+  themselves are not aligned at their end, only non-pad files start aligned).
+- `ti.rename_file(i, new_path)` before `add_torrent` works (renames the
+  in-memory `torrent_info`, `.pad` entries keep their own paths). Confirmed,
+  though also flagged deprecated in 2.1.1 in favour of a `file_storage`-based
+  rename; kept since it is still functional and 1.x-compatible.
+- `handle.rename_file(i, path)` after a torrent has been added to a session
+  works the same way. Confirmed.
+- `ti.hash_for_piece(p)` returns the 20-byte v1 SHA1 for piece `p`;
+  `ti.piece_size(p)` returns that piece's size (last piece may be shorter).
+  Confirmed.
+- `params.have_pieces = [bool, ...]` (on `add_torrent_params`) is accepted
+  and read back unchanged. Confirmed – Phase 6 (`have_pieces` fast path) can
+  go ahead.
+- `ti.files()` is flagged deprecated in 2.1.1 (a newer file_storage accessor
+  exists) but still returns a fully working `file_storage`; used as-is here
+  since replacing it is out of scope for this phase.
+
+If a future libtorrent build removes something above, prefer the documented
+alternative in these notes and update this comment block with what changed.
 """
 
 from __future__ import annotations
@@ -43,25 +75,52 @@ _LAN_SETTINGS_OPTIONAL = {
 }
 
 
+def choose_piece_size(total_bytes: int) -> int:
+    """Piece size rule (docs/plans/game-updates.md 3.1): smaller pieces = finer
+    delta on updates, but not so small the torrent metadata gets huge."""
+    gib = 1024**3
+    if total_bytes < 2 * gib:
+        return 1024 * 1024  # 1 MiB
+    if total_bytes < 16 * gib:
+        return 2 * 1024 * 1024  # 2 MiB
+    return 4 * 1024 * 1024  # 4 MiB
+
+
 def create_torrent_data(
     game_path: Path,
+    files: list[str] | None = None,
+    piece_size: int | None = None,
     on_progress: Callable[[float], None] | None = None,
 ) -> bytes:
-    """Create a .torrent file (as bytes) from a game directory."""
+    """Create a .torrent file (as bytes) from a game directory.
+
+    `files`, when given, are sorted POSIX relpaths (from the content manifest)
+    to include instead of re-scanning the directory — used for update
+    torrents so removed/local-only files never end up in the swarm. Piece
+    size defaults to `choose_piece_size(total_bytes)`. File alignment (hybrid
+    v1+v2, never v1_only) is mandatory for piece-level delta updates.
+    """
     lt = _lt()
     if on_progress:
         on_progress(0.02)
 
-    files = iter_torrent_files(game_path)
-    if not files:
+    parent = game_path.parent
+    if files is not None:
+        file_paths = [game_path / rel for rel in files]
+        file_paths = [p for p in file_paths if p.is_file()]
+    else:
+        file_paths = iter_torrent_files(game_path)
+    if not file_paths:
         raise RuntimeError(f"No shareable files in {game_path}")
 
-    parent = game_path.parent
+    total_bytes = sum(p.stat().st_size for p in file_paths)
+    size = piece_size or choose_piece_size(total_bytes)
+
     fs = lt.file_storage()
-    for file_path in files:
+    for file_path in file_paths:
         rel = file_path.relative_to(parent).as_posix()
         fs.add_file(rel, file_path.stat().st_size)
-    t = lt.create_torrent(fs)
+    t = lt.create_torrent(fs, size)
     t.set_comment(f"DeckDrop – {game_path.name}")
 
     num_pieces = max(int(t.num_pieces()), 1)
@@ -82,6 +141,102 @@ def create_torrent_data(
     if on_progress:
         on_progress(0.98)
     return lt.bencode(t.generate())
+
+
+def retarget_root(lt: object, ti: object, folder_name: str) -> None:
+    """Rename the torrent's top-level folder so files land in <save_path>/<folder_name>/...
+
+    The host's torrent root is the host's own folder name, which can differ
+    from the receiver's dest folder name. Renaming files does not change the
+    info_hash (only the display path inside the torrent metadata), so this is
+    safe to call on any torrent_info, on the host or the receiver.
+    """
+    fs = ti.files()
+    for i in range(fs.num_files()):
+        old = fs.file_path(i).replace("\\", "/")
+        parts = old.split("/", 1)
+        if parts[0] == folder_name:
+            continue
+        new_path = folder_name + ("/" + parts[1] if len(parts) > 1 else "")
+        ti.rename_file(i, new_path)
+
+
+def build_have_pieces(
+    lt: object,
+    ti: object,
+    root: Path,
+    unchanged_rels: list[str] | set[str],
+    changed_rels: list[str] | set[str],
+) -> list[bool]:
+    """Phase 6 "have_pieces" fast path (docs/plans/game-updates.md).
+
+    Pieces of files in `unchanged_rels` are marked present without reading
+    them (trusted: same hash in old/new manifest *and* the local tracker did
+    not report them as changed/removed – callers must only pass files that
+    meet both conditions). Pieces of files in `changed_rels` are verified by
+    reading the local bytes and comparing their SHA1 against the piece hash
+    from `ti`, so unchanged pieces *within* a changed file (e.g. a save-like
+    append at the end) are still marked present. Pieces of any other file
+    (added, or not present locally) are left `False`. Never raises for a
+    single unreadable file – that file's pieces are just left `False`.
+    """
+    from deckdrop.core.content import pieces_for_file, safe_join
+
+    unchanged = set(unchanged_rels)
+    changed = set(changed_rels)
+    piece_length = ti.piece_length()
+    have = [False] * ti.num_pieces()
+
+    fs = ti.files()
+    for i in range(fs.num_files()):
+        if fs.file_flags(i) & lt.file_storage.flag_pad_file:
+            continue
+        path = fs.file_path(i).replace("\\", "/")
+        parts = path.split("/", 1)
+        rel = parts[1] if len(parts) > 1 else parts[0]
+        offset = fs.file_offset(i)
+        size = fs.file_size(i)
+        piece_range = pieces_for_file(offset, size, piece_length)
+        if not piece_range:
+            continue
+
+        if rel in unchanged:
+            for p in piece_range:
+                have[p] = True
+        elif rel in changed:
+            local_path = safe_join(root, rel)
+            if local_path is None or not local_path.is_file():
+                continue
+            try:
+                _verify_changed_file_pieces(ti, local_path, offset, size, piece_range, have)
+            except OSError as exc:
+                log.debug("have_pieces: could not read %s: %s", rel, exc)
+
+    return have
+
+
+def _verify_changed_file_pieces(
+    ti: object,
+    local_path: Path,
+    file_offset: int,
+    file_size: int,
+    piece_range: range,
+    have: list[bool],
+) -> None:
+    import hashlib
+
+    with open(local_path, "rb") as fh:
+        for p in piece_range:
+            piece_size = ti.piece_size(p)
+            piece_start = p * ti.piece_length()
+            file_pos = piece_start - file_offset
+            to_read = max(0, min(piece_size, file_size - file_pos))
+            fh.seek(max(file_pos, 0))
+            data = fh.read(to_read) if to_read > 0 else b""
+            if len(data) < piece_size:
+                data = data + b"\x00" * (piece_size - len(data))
+            if hashlib.sha1(data).digest() == ti.hash_for_piece(p):
+                have[p] = True
 
 
 def make_magnet(torrent_data: bytes) -> tuple[str, str]:
