@@ -235,6 +235,15 @@ export function GameCard({
             tabIndex=${-1}
           >Änderungen verwerfen (aus Netzwerk wiederherstellen)</button>
         `}
+        ${updating && game.update_restart_available && onUpdate && html`
+          <button
+            class="btn btn-secondary"
+            style="width:100%;margin-top:6px;font-size:13px"
+            onClick=${e => { e.stopPropagation(); onUpdate(); }}
+            tabIndex=${-1}
+            title="Der Host bietet inzwischen etwas anderes an – laufendes Update ersetzen"
+          >Update neu starten: ${game.update_restart_label || 'neue Version'}…</button>
+        `}
         ${game.update_available && onUpdate && !updating && html`
           <button
             class="btn btn-secondary"

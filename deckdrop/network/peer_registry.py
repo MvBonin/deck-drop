@@ -551,6 +551,20 @@ class PeerRegistry:
                 break
         return result
 
+    def offers_for(self, game_id: str) -> list[dict]:
+        """Every downloadable (shareable + has_torrent) copy of `game_id` on online peers."""
+        out: list[dict] = []
+        for entry in self._peers.values():
+            if not entry.online:
+                continue
+            for game in entry.games:
+                if game.get("id") != game_id:
+                    continue
+                if not game.get("shareable", True) or not game.get("has_torrent"):
+                    continue
+                out.append(game)
+        return out
+
     def best_update_for(self, game_id: str, local_revision: int) -> dict | None:
         """The highest-revision shareable version of `game_id` newer than `local_revision`."""
         best: dict | None = None

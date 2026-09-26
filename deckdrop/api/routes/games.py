@@ -82,6 +82,10 @@ class GameOut(BaseModel):
     content_hash: str = ""
     update_available: bool = False
     update_version_label: str = ""
+    # An update is running, but the host now offers something else (newer
+    # version, or it rebuilt the torrent and no longer seeds the running one).
+    update_restart_available: bool = False
+    update_restart_label: str = ""
     restore_available: bool = False
 
     @classmethod
@@ -121,6 +125,7 @@ class GameOut(BaseModel):
             update_version_label = best_update.get("version_label") or (
                 f"Rev. {best_update.get('revision', g.content.revision + 1)}"
             )
+        restart_available, restart_label = _update_restart_offer(s, g.id)
         # Phase 7: a game changed locally, but a peer still offers exactly the
         # same content we published before the change – "restore" is just an
         # update to our own version_key, reusing the same download path.
@@ -163,8 +168,34 @@ class GameOut(BaseModel):
             content_hash=g.content.content_hash,
             update_available=best_update is not None,
             update_version_label=update_version_label,
+            update_restart_available=restart_available,
+            update_restart_label=restart_label,
             restore_available=restore_available,
         )
+
+
+def _update_restart_offer(s: object, game_id: str) -> tuple[bool, str]:
+    """(available, label) for "Update neu starten": an update of this game is
+    running, and a peer offers a newer revision than its target, or nobody
+    seeds the running update's torrent any more (host re-hashed / rebuilt)."""
+    transfer = getattr(s, "transfer", None)
+    if transfer is None or not hasattr(transfer, "active_update_for"):
+        return False, ""
+    running = transfer.active_update_for(game_id)
+    if running is None:
+        return False, ""
+    offers = s.peer_registry.offers_for(game_id)  # type: ignore[attr-defined]
+    if not offers:
+        return False, ""
+    newer = [o for o in offers if int(o.get("revision") or 1) > running.target_revision]
+    if running.target_revision <= 0:
+        newer = []  # record from an older version: target revision unknown
+    seeded = any((o.get("info_hash") or "").lower() == running.info_hash for o in offers)
+    if not newer and seeded:
+        return False, ""
+    best = max(newer or offers, key=lambda o: int(o.get("revision") or 1))
+    label = best.get("version_label") or f"Rev. {best.get('revision', '?')}"
+    return True, label
 
 
 class AddGameRequest(BaseModel):
@@ -695,6 +726,8 @@ async def update_game(game_id: str, req: UpdateRequest) -> DownloadOut:
 async def _update_game(
     s: object, g: object, game_id: str, req: UpdateRequest, tracker: object
 ) -> DownloadOut:
+    from deckdrop.network.transfer import UpdateAlreadyRunning
+
     state = tracker.state(game_id)
     if state == "hashing":
         # Don't make the user wait for a baseline hash of the *old* version
@@ -704,8 +737,10 @@ async def _update_game(
         if not stopped:
             raise HTTPException(409, "Hash-Berechnung ließ sich nicht abbrechen")
         g = s.library.get(game_id) or g
-    elif state in ("publishing", "updating"):
+    elif state == "publishing":
         raise HTTPException(409, f"Spiel ist gerade beschäftigt ({state})")
+    # "updating" is fine: start_update replaces the running update (the host
+    # may have published a newer version or rebuilt the torrent meanwhile).
     # No scan here any more: the update's piece check does a fresh stat()
     # comparison itself (ContentTracker.stat_suspects) and reads suspicious
     # files anyway – hashing them here first only delayed the response.
@@ -728,6 +763,8 @@ async def _update_game(
         download_id = await asyncio.to_thread(
             s.transfer.start_update, g, peers, torrent_bytes, manifest, background=True
         )
+    except UpdateAlreadyRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(500, f"Update konnte nicht gestartet werden: {exc}") from exc
 
