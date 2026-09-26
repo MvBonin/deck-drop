@@ -45,6 +45,9 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
     && !game.has_torrent
     && !game.torrent_prep_error;
   const ownPreparing = mode === 'own' && game.torrent_preparing;
+  const installedNoUpdate = mode === 'network' && game.installed && !game.update_available;
+  const installedWithUpdate = mode === 'network' && game.installed && game.update_available;
+  const versionCount = mode === 'network' ? (game.version_count ?? 1) : 1;
   const prepPct = Math.round(
     (prepProgress ?? game.torrent_prep_progress ?? 0) * 100,
   );
@@ -77,7 +80,19 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
       <${CoverImage} game=${game} mode=${mode} />
       <div class="card-body">
         <div class="card-name">${game.name}</div>
-        ${mode === 'own' && html`<div class="card-version">${versionLabel}</div>`}
+        ${mode === 'own' && html`
+          <div class="card-version">
+            ${versionLabel}
+            ${game.update_available && html`
+              <span class="badge badge-success" style="margin-left:6px">
+                Update: ${game.update_version_label || 'verfügbar'}
+              </span>
+            `}
+          </div>
+        `}
+        ${mode === 'network' && versionCount > 1 && html`
+          <div class="card-version"><span class="badge">${versionCount} Versionen</span></div>
+        `}
         <div class="card-meta">
           ${size}
           ${mode === 'network' && game.peer_count != null && html`
@@ -88,6 +103,9 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
           `}
           ${mode === 'own' && game.source_peer_name && html`
             · <span>von ${game.source_peer_name}</span>
+          `}
+          ${game.created_by && html`
+            · <span>Erstellt von ${game.created_by}</span>
           `}
           ${protondbUrl && html`
             · <a
@@ -129,10 +147,10 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
           ${unavailable
             ? html`<span class="unavailable-chip">Nicht verfügbar</span>`
             : html`<button
-                class=${'btn ' + (mode === 'own' ? 'btn-secondary' : 'btn-primary')}
+                class=${'btn ' + (mode === 'own' || installedNoUpdate ? 'btn-secondary' : 'btn-primary')}
                 style=${(mode === 'own' || mode === 'network') && (onEdit || onComments) ? 'flex:1' : ''}
                 onClick=${onAction}
-                disabled=${disabled || ownPreparing || hostPreparing}
+                disabled=${disabled || ownPreparing || hostPreparing || installedNoUpdate}
                 tabIndex=${-1}
               >
                 ${hostPreparing
@@ -141,7 +159,11 @@ export function GameCard({ game, mode = 'own', onAction, onEdit, onComments, onP
                     ? '⏳ Hashes…'
                     : mode === 'own'
                       ? '✓ Geteilt'
-                      : '↓ Laden'}
+                      : installedWithUpdate
+                        ? '⟳ Update'
+                        : installedNoUpdate
+                          ? '✓ Installiert'
+                          : '↓ Laden'}
               </button>`
           }
           ${(mode === 'own' || mode === 'network') && onComments && html`

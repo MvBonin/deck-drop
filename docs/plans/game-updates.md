@@ -483,6 +483,22 @@ diese Dateien, `has_v2()` ist True, Nicht-Pad-Dateien piece-ausgerichtet.
   (Default: `choose_piece_size(total_bytes)`), wie in 3.1 beschrieben, aber nicht separat
   aufgelistet – nötig, damit spätere Phasen (Delta-Update) exakt dieselbe Piece-Größe wie beim
   letzten Build erzwingen können, falls das je gebraucht wird.
+- **Korrektur (umgesetzt mit Phase 4, 2026-09-26):** Die oben genannte Ausnahme
+  ("`POST /api/games/scan` überspringt heruntergeladene Spiele") wird zurückgenommen. Laut
+  Entscheidung 2 darf jeder ein Update veröffentlichen und heruntergeladene Kopien werden ebenfalls
+  geseedet, also müssen sie genauso erkannt/gesperrt werden wie lokal geteilte Spiele.
+  `scan_all_games` scannt jetzt alle Spiele ohne `origin`-Ausnahme, und
+  `TransferManager._register_downloaded_game` ruft nach der Registrierung
+  `ContentTracker.ensure_baseline` auf (Snapshot, falls das Manifest schon Hashes lieferte; sonst
+  volles Hashen wie bei einem lokal hinzugefügten Spiel). Tests:
+  `tests/test_downloaded_game_scan.py`.
+- **Korrektur (umgesetzt mit Phase 4, 2026-09-26):** Die Baseline-Hash-Runde für alle Spiele beim
+  Start (`main.py` Lifespan) lief bisher synchron und konnte den Serverstart bei einer großen
+  Bibliothek/langsamer SD-Karte blockieren. Sie läuft jetzt in einem eigenen Daemon-Thread
+  (`deckdrop.main._baseline_all_then_scan`, extrahiert als modulweite Funktion, damit sie ohne
+  laufenden Server testbar ist); jedes Spiel bleibt währenddessen im Zustand `hashing` (nicht
+  teilbar) – das leistet `ContentTracker.ensure_baseline` bereits von sich aus. Test:
+  `tests/test_main_baseline_thread.py`.
 
 ---
 
@@ -574,6 +590,52 @@ Hilfsfunktion `peer_registry.peers_for_version(game_id, version_key) -> list[Pee
 Revision → eine Gruppe, zwei Versionen, `peers` korrekt, Sortierung, `update_available` bei lokaler
 älterer Revision. `tests/test_api_manifest.py`: `/manifest` und `/torrent` (Cache-Datei im tmp) liefern
 Daten; 409 wenn modified. Download-Start mit unbekanntem `version_key` → 404; installiertes Spiel → 409.
+
+### Abweichungen Phase 4 (umgesetzt 2026-09-26)
+
+- **`all_network_games` gruppiert weiterhin nach der Spiel-`id`**, wie in 4.2 beschrieben (nicht
+  mehr nach Name+Größe wie vor Phase 4). Der bestehende Test
+  `test_peer_registry.py::test_all_network_games_groups_same_title` prüfte explizit das alte
+  Name+Größe-Verhalten mit zwei unterschiedlichen IDs; er wurde durch
+  `test_all_network_games_groups_same_id` (gleiche ID, verschiedene Peers → eine Version) und
+  `test_all_network_games_different_ids_not_grouped` (gleicher Name+Größe, verschiedene ID → zwei
+  Gruppen) ersetzt – das ist die vom Plan geforderte Verhaltensänderung, kein Bug.
+- **`peers_for_version`/`best_update_for` filtern zusätzlich auf `has_torrent`**, nicht nur
+  `shareable` – eine Version ohne bereits gebauten Torrent kann nicht heruntergeladen werden, auch
+  wenn sie inhaltlich "sauber" (shareable) ist (z. B. direkt nach `publish()`, bevor
+  `torrent_prep` fertig ist).
+- **`/api/games/{id}/torrent` löst wie `/magnet` `schedule_prepare` aus**, wenn kein Cache-File
+  existiert, statt nur 404 zurückzugeben – ein Peer, der eine gerade veröffentlichte Version zum
+  ersten Mal abruft, soll die Vorbereitung anstoßen statt ins Leere zu laufen (409 + Empfehlung
+  "kurz warten", wie beim bestehenden `/magnet`-Verhalten).
+- **`POST /api/download` fällt bei Version-spezifischen Downloads einzeln auf Magnet zurück**, wenn
+  `/torrent` beim gewählten Peer 404/Fehler liefert (alter Peer ohne Phase-4-Endpunkte) – Manifest
+  und Torrent-Bytes werden dafür unabhängig voneinander per Best-Effort geholt
+  (`_fetch_peer_manifest`/`_fetch_peer_torrent`, beide geben bei jedem Fehler `None` zurück statt zu
+  werfen); nur wenn am Ende kein `torrent_bytes` vorliegt, greift der bisherige
+  `_fetch_magnet_from_peer`-Pfad (der bei einem echten Fehler weiterhin eine `HTTPException` wirft).
+  Das deckt „Manifest ja, Torrent nein“ und umgekehrt ab, ohne dass ein alter Peer den ganzen
+  Download-Start scheitern lässt.
+- **`ResumeStore.save_torrent` ist ein dünner Alias auf `save_metadata`** (identischer Dateiname/-ort,
+  den `find_metadata` erwartet) – im Plan als eigene Methode aufgeführt, aber inhaltlich exakt das,
+  was `save_metadata` schon für den "Metadaten aus eingehendem Download cachen"-Fall tut. Ein
+  eigener Speicherort hätte `_params_for_record`s bestehende resume>torrent>magnet-Priorität
+  duplizieren müssen.
+- **`_maybe_upgrade_from_peer`-Guard vergleicht `content_hash`, nicht `info_hash`**, um zu erkennen,
+  ob der Peer wirklich eine andere Version veröffentlicht hat oder nur denselben Torrent neu gebaut
+  hat (z. B. andere Piece-Größe) – wie in 4.4 gefordert. Ist `rec.expected_content_hash` leer (kein
+  `version_key` beim Start, alte Clients/empfohlene Version), bleibt das bisherige Verhalten
+  (Auto-Upgrade bei jedem neuen `info_hash`) unverändert.
+- **`GameOut.update_available`/`update_version_label`** nutzen die neue
+  `peer_registry.best_update_for(game_id, local_revision)` bereits jetzt (Phase 5 fordert das
+  explizit erst dort), weil `GameCard.js` ohne dieses Feld kein "Update verfügbar"-Badge zeigen
+  könnte; die eigentliche Update-Übernahme (`UpdateGame.js`, `POST /api/games/{id}/update`) bleibt
+  Phase 5. Bis dahin öffnet der "⟳ Update"-Button in `Network.js` nur einen Toast-Hinweis und
+  navigiert zu „Meine Spiele“ (Platzhalter, wie in 4.5 als Minimalversion vorgesehen).
+- **`frontend/components/VersionList.js`** verwendet Inline-Styles mit den bestehenden CSS-Variablen
+  (`--surface-2`, `--surface-3`, `--text-dim`, `--danger`, `--accent`) statt neuer CSS-Klassen, analog
+  zu `PublishUpdate.js` – vermeidet Änderungen an `style.css` für eine erste, noch von Phase 5
+  wiederverwendete Komponente.
 
 ---
 
@@ -733,7 +795,7 @@ funktioniert vollständig ohne.
 - [x] Phase 1 – Datenmodell, Manifest, ID-Fix, Ordnername-Fix
 - [x] Phase 2 – Änderungserkennung + Sperre
 - [x] Phase 3 – Update veröffentlichen
-- [ ] Phase 4 – Versionen im Netzwerk + Versionswahl beim Erst-Download
+- [x] Phase 4 – Versionen im Netzwerk + Versionswahl beim Erst-Download
 - [ ] Phase 5 – Update übernehmen
 - [ ] Phase 6 (optional) – Schnellpfad
 - [ ] Phase 7 (optional) – Wiederherstellen, Decky

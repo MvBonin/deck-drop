@@ -86,6 +86,12 @@ class _PersistedRecord:
     # errors clear themselves and never pause the torrent.
     error_recoverable: bool = False
     restore_attempts: int = 0
+    # Phase 4: version-aware downloads (see docs/plans/game-updates.md "4.4").
+    # All defaulted so an old downloads-state.json still loads.
+    kind: str = "new"  # "new" | "update"
+    extra_peer_ids: list[str] = field(default_factory=list)
+    expected_content_hash: str = ""
+    local_game_path: str = ""  # only set for kind == "update"
 
 
 _MAGNET_CHECK_INTERVAL = 15.0
@@ -441,6 +447,17 @@ class TransferManager:
             rec.peer_address = current
         return rec.peer_address
 
+    def _connect_extra_peers(self, handle: object, rec: _PersistedRecord) -> None:
+        """Connect to every additional peer sharing this download's version (multi-source)."""
+        for extra_id in rec.extra_peer_ids:
+            address = self._registry_peer_address(extra_id)
+            if not address:
+                continue
+            try:
+                handle.connect_peer((address, self._cfg.torrent_port))
+            except Exception as exc:
+                log.debug("connect_peer to extra peer %s failed: %s", extra_id, exc)
+
     def update_peer_address(self, peer_id: str, address: str) -> None:
         """Keep torrent peer connections in sync when mDNS reports a new IP."""
         if not address:
@@ -552,6 +569,10 @@ class TransferManager:
         peer_address: str,
         dest_path: Path,
         download_id: str | None = None,
+        torrent_bytes: bytes | None = None,
+        manifest: dict | None = None,
+        extra_peer_ids: list[str] | None = None,
+        expected_content_hash: str = "",
     ) -> str:
         lt = _lt()
         download_id = download_id or secrets.token_hex(4)
@@ -570,12 +591,19 @@ class TransferManager:
             started_at=time.time(),
             peer_address=peer_address,
             info_hash=info_hash,
+            extra_peer_ids=list(dict.fromkeys(extra_peer_ids or [])),
+            expected_content_hash=expected_content_hash,
         )
+        if torrent_bytes:
+            self._resume_store.save_torrent(download_id, info_hash, torrent_bytes)
+        if manifest:
+            self._resume_store.save_manifest(download_id, manifest)
         params, source = self._params_for_record(lt, rec, save_path)
         handle = self._session.add_torrent(params)
 
-        # Directly connect to the peer who has the game – no waiting for LSD
+        # Directly connect to the peer(s) who have the game – no waiting for LSD.
         handle.connect_peer((peer_address, self._cfg.torrent_port))
+        self._connect_extra_peers(handle, rec)
 
         self._pending_download_dests.discard(dest_path.resolve())
         self._handles[download_id] = _Handle(
@@ -616,15 +644,23 @@ class TransferManager:
         nor re-hashes what is already on disk.
         """
         target = str(save_path)
+        folder_name = Path(rec.dest_path).name or None
 
         blob = self._resume_store.load_resume(rec.download_id, rec.info_hash)
         if blob:
             params = resume_mod.decode_resume_params(lt, blob, target)
             if params is not None:
+                if folder_name is not None:
+                    ti = getattr(params, "ti", None)
+                    if ti is not None:
+                        try:
+                            from deckdrop.core.torrent import retarget_root
+
+                            retarget_root(lt, ti, folder_name)
+                        except Exception as exc:
+                            log.debug("retarget_root on resume params failed: %s", exc)
                 return params, "resume"
             self._resume_store.drop_resume(rec.download_id, rec.info_hash)
-
-        folder_name = Path(rec.dest_path).name or None
 
         cached = self._resume_store.find_metadata(rec.download_id, rec.info_hash)
         if cached is not None:
@@ -943,6 +979,7 @@ class TransferManager:
             handle = self._session.add_torrent(params)
             if rec.peer_address:
                 handle.connect_peer((rec.peer_address, self._cfg.torrent_port))
+            self._connect_extra_peers(handle, rec)
             self._handles[rec.download_id] = _Handle(
                 download_id=rec.download_id,
                 game_id=rec.game_id,
@@ -1017,8 +1054,30 @@ class TransferManager:
         remote_game = next((g for g in peer.games if g.get("id") == h.game_id), None)
         return peer, remote_game
 
+    def _ensure_content_baseline(self, game_id: str) -> None:
+        """Baseline a freshly-downloaded game (snapshot only if the manifest already
+        supplied files/sizes/content_hash; full hash otherwise, e.g. legacy peers).
+        Fail-open like `_is_shareable` – tests build TransferManager standalone.
+        """
+        from deckdrop.api import state as app_state
+
+        try:
+            s = app_state.get()
+        except RuntimeError:
+            return
+        try:
+            s.get_content_tracker().ensure_baseline(game_id)
+        except Exception as exc:
+            log.warning("Content baseline failed for downloaded game %s: %s", game_id, exc)
+
     def _register_downloaded_game(self, h: _Handle) -> None:
-        """Write deckdrop.toml with origin peer so My Games shows the source."""
+        """Write deckdrop.toml with origin peer so My Games shows the source.
+
+        If a manifest was fetched for this download (Phase 4), it is applied
+        so the receiver's `[content]`/`[[history]]`/`[files]`/`[sizes]` match
+        the host's exactly, keeping the host's game id either way (see the
+        legacy-ID bug in docs/plans/game-updates.md "Kontext").
+        """
         from deckdrop.core import game as game_mod
         from deckdrop.core import integrity
 
@@ -1035,10 +1094,16 @@ class TransferManager:
             except (TypeError, ValueError):
                 steam_app_id = None
 
+        manifest = self._resume_store.load_manifest(h.download_id)
+
         try:
             info = game_mod.load_from_path(dest)
             if info:
                 changed = False
+                if manifest:
+                    game_mod.apply_manifest(info, manifest, keep_local_meta=False)
+                    info.size_bytes = integrity.dir_size(dest)
+                    changed = True
                 if not info.origin.peer_name:
                     info.origin.peer_id = h.peer_id
                     info.origin.peer_name = h.peer_name
@@ -1061,12 +1126,15 @@ class TransferManager:
                     added_by=added_by,
                     steam_app_id=steam_app_id,
                 )
+                if manifest:
+                    game_mod.apply_manifest(info, manifest, keep_local_meta=False)
                 info.id = h.game_id
                 info.origin.peer_id = h.peer_id
                 info.origin.peer_name = h.peer_name
                 info.size_bytes = integrity.dir_size(dest)
                 game_mod.save(info)
             log.info("Registered download at %s (from %s)", dest, h.peer_name)
+            self._ensure_content_baseline(info.id)
         except Exception as exc:
             log.warning("Could not register downloaded game at %s: %s", dest, exc)
 
@@ -1417,6 +1485,7 @@ class TransferManager:
                 log.debug("connect_peer (no peers) for %s → %s", did, address)
             except Exception as exc:
                 log.warning("connect_peer failed for %s: %s", did, exc)
+            self._connect_extra_peers(h.handle, rec)
 
         if now - self._last_reannounce_at.get(did, 0) >= _NO_PEER_REANNOUNCE_INTERVAL:
             self._last_reannounce_at[did] = now
@@ -1573,6 +1642,18 @@ class TransferManager:
 
         remote_hash = (remote_game.get("info_hash") or "").lower()
         if not remote_hash or remote_hash == rec.info_hash:
+            return False
+
+        # A chosen version must not be silently swapped for a different one:
+        # only auto-upgrade when the peer has no content hash yet (legacy) or
+        # it still matches the content the user picked (the torrent was only
+        # rebuilt, e.g. piece-size change, but the bytes are the same).
+        remote_content_hash = (remote_game.get("content_hash") or "").lower()
+        if (
+            remote_content_hash
+            and rec.expected_content_hash
+            and remote_content_hash != rec.expected_content_hash.lower()
+        ):
             return False
 
         try:

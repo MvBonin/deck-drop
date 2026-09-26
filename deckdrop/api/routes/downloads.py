@@ -34,6 +34,32 @@ def _peer_http_url(address: str, port: int, path: str) -> str:
     return f"http://{host}:{port}{path}"
 
 
+def _fetch_peer_manifest(address: str, port: int, game_id: str) -> dict | None:
+    """Best-effort manifest fetch; None for an old peer without /manifest or any error."""
+    url = _peer_http_url(address, port, f"/api/games/{game_id}/manifest")
+    try:
+        r = httpx.get(url, timeout=15.0)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception as exc:
+        log.debug("Manifest fetch failed for %s: %s", game_id, exc)
+        return None
+
+
+def _fetch_peer_torrent(address: str, port: int, game_id: str) -> bytes | None:
+    """Best-effort .torrent fetch; None for an old peer without /torrent or any error."""
+    url = _peer_http_url(address, port, f"/api/games/{game_id}/torrent")
+    try:
+        r = httpx.get(url, timeout=30.0)
+        if r.status_code != 200:
+            return None
+        return r.content
+    except Exception as exc:
+        log.debug("Torrent fetch failed for %s: %s", game_id, exc)
+        return None
+
+
 def _fetch_magnet_from_peer(address: str, port: int, game_id: str) -> str:
     """Fetch magnet from host; retry while host prepares torrent (HTTP 409)."""
     url = _peer_http_url(address, port, f"/api/games/{game_id}/magnet")
@@ -72,6 +98,9 @@ def _fetch_magnet_from_peer(address: str, port: int, game_id: str) -> str:
 class StartDownloadRequest(BaseModel):
     peer_id: str
     game_id: str
+    # Which network version to fetch (peer_registry version_key). None keeps
+    # the pre-Phase-4 behaviour: use the recommended version from `peer_id`.
+    version_key: str | None = None
 
 
 class DownloadOut(BaseModel):
@@ -119,6 +148,9 @@ def _status_or_404(transfer: object, download_id: str) -> DownloadOut:
 async def start_download(req: StartDownloadRequest) -> DownloadOut:
     s = _get_transfer_or_503()
 
+    if s.library.get(req.game_id) is not None:
+        raise HTTPException(409, "Spiel ist schon installiert – Update verwenden.")
+
     peer = s.peer_registry.get(req.peer_id)
     if not peer:
         raise HTTPException(404, f"Peer {req.peer_id} nicht gefunden")
@@ -126,6 +158,30 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
     game = next((g for g in peer.games if g["id"] == req.game_id), None)
     if not game:
         raise HTTPException(404, f"Spiel {req.game_id} beim Peer {req.peer_id} nicht gefunden")
+
+    # Which peer(s) actually serve the requested version. Without a
+    # version_key (old clients / recommended version) it's just `peer`.
+    chosen_peer = peer
+    extra_peer_ids: list[str] = []
+    expected_content_hash = ""
+    manifest: dict | None = None
+    torrent_bytes: bytes | None = None
+
+    if req.version_key is not None:
+        version_peers = s.peer_registry.peers_for_version(req.game_id, req.version_key)
+        if not version_peers:
+            raise HTTPException(404, f"Version {req.version_key} nicht gefunden")
+        chosen_peer = version_peers[0]
+        extra_peer_ids = [p.peer_id for p in version_peers[1:]]
+        game = next((g for g in chosen_peer.games if g["id"] == req.game_id), game)
+        expected_content_hash = game.get("content_hash") or ""
+
+        manifest = await asyncio.to_thread(
+            _fetch_peer_manifest, chosen_peer.address, chosen_peer.port, req.game_id
+        )
+        torrent_bytes = await asyncio.to_thread(
+            _fetch_peer_torrent, chosen_peer.address, chosen_peer.port, req.game_id
+        )
 
     dest_path = (s.cfg.download_dir / game.get("name", req.game_id)).resolve()
     s.transfer.reserve_download_dest(dest_path)
@@ -138,28 +194,44 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
             log.warning("Could not remove stale deckdrop.toml at %s: %s", stale_toml, exc)
 
     try:
-        try:
-            magnet = await asyncio.to_thread(
-                _fetch_magnet_from_peer, peer.address, peer.port, req.game_id
-            )
-            for g in peer.games:
-                if g["id"] == req.game_id:
-                    g["has_torrent"] = True
-                    break
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(502, f"Magnet-Link vom Host nicht abrufbar: {exc}") from exc
+        if torrent_bytes is not None:
+            try:
+                from deckdrop.core.torrent import make_magnet
+
+                magnet, _info_hash = make_magnet(torrent_bytes)
+            except Exception as exc:
+                log.warning("Torrent bytes from %s unusable, falling back: %s", chosen_peer, exc)
+                torrent_bytes = None
+
+        if torrent_bytes is None:
+            # Either no version_key was given, or the peer is too old to
+            # serve /torrent (404) – fall back to the magnet flow as before.
+            try:
+                magnet = await asyncio.to_thread(
+                    _fetch_magnet_from_peer, chosen_peer.address, chosen_peer.port, req.game_id
+                )
+                for g in chosen_peer.games:
+                    if g["id"] == req.game_id:
+                        g["has_torrent"] = True
+                        break
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(502, f"Magnet-Link vom Host nicht abrufbar: {exc}") from exc
 
         try:
             download_id = s.transfer.start_download(
                 game_id=req.game_id,
                 game_name=game.get("name", "Unknown"),
                 magnet=magnet,
-                peer_id=req.peer_id,
-                peer_name=peer.name,
-                peer_address=peer.address,
+                peer_id=chosen_peer.peer_id,
+                peer_name=chosen_peer.name,
+                peer_address=chosen_peer.address,
                 dest_path=dest_path,
+                torrent_bytes=torrent_bytes,
+                manifest=manifest,
+                extra_peer_ids=extra_peer_ids,
+                expected_content_hash=expected_content_hash,
             )
         except Exception as exc:
             raise HTTPException(500, f"Download konnte nicht gestartet werden: {exc}") from exc

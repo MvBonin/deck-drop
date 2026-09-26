@@ -170,7 +170,15 @@ class PeerRegistry:
             og = old_by_id.get(gid)
             if not og:
                 return True
-            for key in ("has_torrent", "torrent_preparing", "torrent_prep_error", "info_hash"):
+            for key in (
+                "has_torrent",
+                "torrent_preparing",
+                "torrent_prep_error",
+                "info_hash",
+                "content_hash",
+                "content_state",
+                "revision",
+            ):
                 if og.get(key) != ng.get(key):
                     return True
         return False
@@ -350,29 +358,150 @@ class PeerRegistry:
         entry = self._peers.get(peer_id)
         return entry.games if entry else []
 
+    @staticmethod
+    def _version_key(game: dict, peer_id: str) -> str:
+        return game.get("content_hash") or game.get("info_hash") or f"legacy:{peer_id}"
+
     def all_network_games(self) -> list[dict]:
-        """Games from all online peers, grouped by name+size with peer_count."""
-        groups: dict[tuple[str, int], list[dict]] = {}
+        """Games from all online peers, grouped by game id, then by version.
+
+        See docs/plans/game-updates.md "4.2". Groups by the game's stable id
+        (not name+size, which broke as soon as an update changed the size).
+        Within a group, entries are further grouped by version_key
+        (content_hash, falling back to info_hash, then a per-peer legacy key)
+        so that several peers on the same content show up as one selectable
+        version, while peers with a newer/older/unreleased revision show up
+        as their own entries in `versions`.
+        """
+        groups: dict[str, list[dict]] = {}
 
         for entry in self._peers.values():
             if not entry.online:
                 continue
             for game in entry.games:
-                key = (game.get("name", ""), int(game.get("size_bytes") or 0))
-                groups.setdefault(key, []).append(
+                gid = game.get("id")
+                if not gid:
+                    continue
+                groups.setdefault(gid, []).append(
                     {**game, "peer_id": entry.peer_id, "peer_name": entry.name}
                 )
 
+        local_games: dict[str, Any] = {}
+        if self._library is not None:
+            for g in self._library.all():
+                local_games[g.id] = g
+
         result: list[dict] = []
-        for variants in groups.values():
-            ready = [v for v in variants if v.get("has_torrent")]
-            primary = ready[0] if ready else variants[0]
-            peer_names = [v["peer_name"] for v in variants]
+        for game_id, entries in groups.items():
+            by_version: dict[str, list[dict]] = {}
+            for e in entries:
+                vkey = self._version_key(e, e["peer_id"])
+                by_version.setdefault(vkey, []).append(e)
+
+            versions: list[dict] = []
+            for vkey, es in by_version.items():
+                first = es[0]
+                shareable = bool(first.get("shareable", True))
+                has_torrent = bool(first.get("has_torrent", False))
+                seen_peers: set[str] = set()
+                peers: list[dict] = []
+                for e in es:
+                    if e["peer_id"] in seen_peers:
+                        continue
+                    seen_peers.add(e["peer_id"])
+                    peers.append({"peer_id": e["peer_id"], "peer_name": e["peer_name"]})
+                versions.append(
+                    {
+                        "version_key": vkey,
+                        "revision": first.get("revision", 1),
+                        "version_label": first.get("version_label", ""),
+                        "version_note": first.get("version_note", ""),
+                        "created_by": first.get("created_by", ""),
+                        "content_updated_by": first.get("content_updated_by", ""),
+                        "content_updated_at": first.get("content_updated_at", ""),
+                        "size_bytes": first.get("size_bytes", 0),
+                        "info_hash": first.get("info_hash"),
+                        "shareable": shareable,
+                        "has_torrent": has_torrent,
+                        "peers": peers,
+                    }
+                )
+
+            versions.sort(
+                key=lambda v: (v["revision"], v["content_updated_at"] or ""), reverse=True
+            )
+
+            shareable_versions = [v for v in versions if v["shareable"] and v["has_torrent"]]
+            primary_version = shareable_versions[0] if shareable_versions else versions[0]
+            primary_key = primary_version["version_key"]
+            primary_entry = next(
+                e for e in entries if self._version_key(e, e["peer_id"]) == primary_key
+            )
+
+            local = local_games.get(game_id)
+            installed = local is not None
+            local_revision = local.content.revision if local else None
+            local_version_key: str | None = None
+            if local is not None:
+                local_version_key = local.content.content_hash or local.torrent.info_hash or None
+            update_available = installed and any(
+                v["shareable"] and v["has_torrent"] and v["revision"] > (local_revision or 0)
+                for v in versions
+            )
+
+            peer_names: list[str] = []
+            for e in entries:
+                if e["peer_name"] not in peer_names:
+                    peer_names.append(e["peer_name"])
+
             result.append(
                 {
-                    **primary,
-                    "peer_count": len(variants),
+                    **primary_entry,
+                    "versions": versions,
+                    "version_count": len([v for v in versions if v["shareable"]]),
+                    "peer_count": len(entries),
                     "peer_names": peer_names,
+                    "installed": installed,
+                    "local_revision": local_revision,
+                    "local_version_key": local_version_key,
+                    "update_available": update_available,
                 }
             )
         return result
+
+    def peers_for_version(self, game_id: str, version_key: str) -> list[PeerEntry]:
+        """Online peers sharing `version_key` of `game_id` (shareable + has_torrent only)."""
+        result: list[PeerEntry] = []
+        seen: set[str] = set()
+        for entry in self._peers.values():
+            if not entry.online or entry.peer_id in seen:
+                continue
+            for game in entry.games:
+                if game.get("id") != game_id:
+                    continue
+                if self._version_key(game, entry.peer_id) != version_key:
+                    continue
+                if not game.get("shareable", True) or not game.get("has_torrent"):
+                    continue
+                result.append(entry)
+                seen.add(entry.peer_id)
+                break
+        return result
+
+    def best_update_for(self, game_id: str, local_revision: int) -> dict | None:
+        """The highest-revision shareable version of `game_id` newer than `local_revision`."""
+        best: dict | None = None
+        for entry in self._peers.values():
+            if not entry.online:
+                continue
+            for game in entry.games:
+                if game.get("id") != game_id:
+                    continue
+                if not game.get("shareable", True) or not game.get("has_torrent"):
+                    continue
+                rev = int(game.get("revision") or 1)
+                if rev <= local_revision:
+                    continue
+                if best is None or rev > int(best.get("revision") or 1):
+                    best = game
+        return best

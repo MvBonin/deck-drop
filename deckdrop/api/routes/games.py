@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from deckdrop.api import state as app_state
@@ -73,6 +73,8 @@ class GameOut(BaseModel):
     content_updated_by: str = ""
     content_updated_at: str = ""
     content_hash: str = ""
+    update_available: bool = False
+    update_version_label: str = ""
 
     @classmethod
     def from_info(cls, g: GameInfo) -> GameOut:
@@ -96,6 +98,12 @@ class GameOut(BaseModel):
                 prep_progress = 0.0
         local_cover = has_local_cover(g.path)
         content_state = tracker.state(g.id)
+        best_update = s.peer_registry.best_update_for(g.id, g.content.revision)
+        update_version_label = ""
+        if best_update is not None:
+            update_version_label = best_update.get("version_label") or (
+                f"Rev. {best_update.get('revision', g.content.revision + 1)}"
+            )
         return cls(
             id=g.id,
             name=g.name,
@@ -128,6 +136,8 @@ class GameOut(BaseModel):
             content_updated_by=g.content.updated_by,
             content_updated_at=g.content.updated_at,
             content_hash=g.content.content_hash,
+            update_available=best_update is not None,
+            update_version_label=update_version_label,
         )
 
 
@@ -399,6 +409,54 @@ def get_magnet(game_id: str) -> dict[str, str]:
     return {"magnet": g.torrent.magnet, "info_hash": g.torrent.info_hash}
 
 
+@router.get("/games/{game_id}/manifest")
+def get_manifest(game_id: str) -> dict:
+    """Public (no local_only): the manifest peers use to compare/download versions."""
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+
+    tracker = s.get_content_tracker()
+    tracker.scan(game_id)
+    if not tracker.is_shareable(game_id):
+        raise HTTPException(
+            409,
+            "Spiel wurde verändert – erst als Update veröffentlichen.",
+        )
+    return game_mod.manifest_dict(g)
+
+
+@router.get("/games/{game_id}/torrent")
+def get_torrent(game_id: str) -> Response:
+    """Public (no local_only): raw .torrent bytes for a peer starting a download."""
+    s = app_state.get()
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+
+    tracker = s.get_content_tracker()
+    tracker.scan(game_id)
+    if not tracker.is_shareable(game_id):
+        raise HTTPException(
+            409,
+            "Spiel wurde verändert – erst als Update veröffentlichen.",
+        )
+
+    cache_path = s.cfg.torrent_cache / f"{g.id}.torrent"
+    if not cache_path.is_file():
+        prep_err = torrent_prep.get_prep_error(game_id)
+        if prep_err:
+            raise HTTPException(503, f"Torrent konnte nicht erzeugt werden: {prep_err}") from None
+        torrent_prep.schedule_prepare(game_id)
+        raise HTTPException(
+            409,
+            "Torrent wird vorbereitet – bitte kurz warten und erneut versuchen.",
+        )
+
+    return Response(content=cache_path.read_bytes(), media_type="application/x-bittorrent")
+
+
 class PublishRequest(BaseModel):
     version_label: str = ""
     note: str = ""
@@ -415,9 +473,6 @@ def scan_all_games() -> dict[str, str]:
     tracker = s.get_content_tracker()
     result: dict[str, str] = {}
     for g in s.library.all():
-        if g.origin.peer_id or g.origin.peer_name:
-            # Downloaded copies aren't hashed/tracked the same way (yet).
-            continue
         result[g.id] = tracker.scan(g.id)
     return result
 

@@ -61,7 +61,37 @@ def test_all_network_games_injects_peer_info(registry):
     assert games[0]["peer_count"] == 1
 
 
-def test_all_network_games_groups_same_title(registry):
+def test_all_network_games_groups_same_id(registry):
+    """Games are grouped by stable id (Phase 4), not name+size."""
+    registry.upsert_sync("p1", "Alice", "192.168.1.10", 7373)
+    registry.upsert_sync("p2", "Bob", "192.168.1.11", 7373)
+    registry.get("p1").games = [
+        {
+            "id": "a1",
+            "name": "Portal 2",
+            "size_bytes": 500,
+            "has_torrent": True,
+            "content_hash": "hash1",
+        }
+    ]
+    registry.get("p2").games = [
+        {
+            "id": "a1",
+            "name": "Portal 2",
+            "size_bytes": 500,
+            "has_torrent": True,
+            "content_hash": "hash1",
+        }
+    ]
+    games = registry.all_network_games()
+    assert len(games) == 1
+    assert games[0]["peer_count"] == 2
+    assert set(games[0]["peer_names"]) == {"Alice", "Bob"}
+    assert games[0]["version_count"] == 1
+
+
+def test_all_network_games_different_ids_not_grouped(registry):
+    """Same name+size but a different id (e.g. two unrelated games) stay separate."""
     registry.upsert_sync("p1", "Alice", "192.168.1.10", 7373)
     registry.upsert_sync("p2", "Bob", "192.168.1.11", 7373)
     registry.get("p1").games = [
@@ -71,9 +101,7 @@ def test_all_network_games_groups_same_title(registry):
         {"id": "b1", "name": "Portal 2", "size_bytes": 500, "has_torrent": False}
     ]
     games = registry.all_network_games()
-    assert len(games) == 1
-    assert games[0]["peer_count"] == 2
-    assert set(games[0]["peer_names"]) == {"Alice", "Bob"}
+    assert len(games) == 2
 
 
 def test_all_network_games_excludes_offline(registry):

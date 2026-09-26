@@ -13,6 +13,7 @@ in transfer.py) and degrades to ``None``/``0`` instead of raising.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ log = logging.getLogger(__name__)
 
 _RESUME_SUFFIX = ".resume"
 _TORRENT_SUFFIX = ".torrent"
+_MANIFEST_SUFFIX = ".manifest.json"
 
 
 def _slug(info_hash: str) -> str:
@@ -61,7 +63,7 @@ class ResumeStore:
         return self.find_metadata(download_id, info_hash) is not None
 
     def discard(self, download_id: str) -> None:
-        """Drop every blob belonging to a download (any info hash)."""
+        """Drop every blob belonging to a download (any info hash), plus its manifest."""
         if not self._dir.is_dir():
             return
         for path in self._dir.glob(f"{download_id}-*"):
@@ -69,6 +71,12 @@ class ResumeStore:
                 path.unlink()
             except OSError as exc:
                 log.warning("Could not delete %s: %s", path, exc)
+        try:
+            self.manifest_path(download_id).unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.warning("Could not delete manifest for %s: %s", download_id, exc)
 
     def drop_resume(self, download_id: str, info_hash: str) -> None:
         try:
@@ -77,6 +85,37 @@ class ResumeStore:
             pass
         except OSError as exc:
             log.warning("Could not delete resume blob for %s: %s", download_id, exc)
+
+    # -- manifest + torrent (Phase 4: version-aware downloads) --
+
+    def manifest_path(self, download_id: str) -> Path:
+        return self._dir / f"{download_id}{_MANIFEST_SUFFIX}"
+
+    def save_manifest(self, download_id: str, manifest: dict) -> bool:
+        try:
+            blob = json.dumps(manifest).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            log.warning("Manifest for %s not serializable: %s", download_id, exc)
+            return False
+        return self._write(self.manifest_path(download_id), blob)
+
+    def load_manifest(self, download_id: str) -> dict | None:
+        blob = self._read(self.manifest_path(download_id))
+        if blob is None:
+            return None
+        try:
+            return json.loads(blob.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            log.warning("Manifest for %s unreadable: %s", download_id, exc)
+            return None
+
+    def save_torrent(self, download_id: str, info_hash: str, blob: bytes) -> bool:
+        """Save a .torrent fetched from a peer where `find_metadata` looks for it.
+
+        This makes the existing resume>torrent>magnet priority in
+        `TransferManager._params_for_record` pick it up automatically.
+        """
+        return self.save_metadata(download_id, info_hash, blob)
 
     # -- internal --
 
