@@ -224,7 +224,7 @@ class PeerRegistry:
         log.debug("Fetched %d games from %s", len(games), entry.name)
 
         if self._library is not None and games:
-            await self._sync_from_peer(games, address, port)
+            await self._sync_from_peer(peer_id, games, address, port)
 
         if is_new_peer:
             await broadcast(
@@ -247,13 +247,49 @@ class PeerRegistry:
                 },
             )
 
-    async def _sync_from_peer(self, remote_games: list[dict], address: str, port: int) -> None:
+    def _find_legacy_match(self, peer_id: str, rg: dict, remote_ids: set[str]) -> Any | None:
+        """Find a previously-downloaded game whose ID doesn't match this peer's ID for it.
+
+        Fixes the legacy bug where a download used to get a freshly minted ID
+        instead of the host's – see docs/plans/game-updates.md "1.4".
+        """
+        name = rg.get("name")
+        size = int(rg.get("size_bytes") or 0)
+        for local in self._library.all():
+            if local.origin.peer_id != peer_id:
+                continue
+            if local.name != name:
+                continue
+            if abs(local.size_bytes - size) >= 1024 * 1024:
+                continue
+            if local.id in remote_ids:
+                continue
+            return local
+        return None
+
+    async def _sync_from_peer(
+        self, peer_id: str, remote_games: list[dict], address: str, port: int
+    ) -> None:
         """Sync metadata and comments for games we share with this peer."""
+        remote_ids = {g.get("id") for g in remote_games if g.get("id")}
         for rg in remote_games:
             game_id = rg.get("id")
             if not game_id:
                 continue
             local = self._library.get(game_id)
+            if not local:
+                legacy = self._find_legacy_match(peer_id, rg, remote_ids)
+                if legacy is not None:
+                    from deckdrop.api import state as app_state
+                    from deckdrop.core.library import relink_game_id
+
+                    try:
+                        cfg = app_state.get().cfg
+                    except RuntimeError:
+                        cfg = None
+                    if cfg is not None:
+                        relink_game_id(cfg, self._library, legacy, game_id)
+                        local = self._library.get(game_id)
             if not local:
                 continue
 

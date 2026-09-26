@@ -5,11 +5,14 @@ Central in-memory registry used by the API layer.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from deckdrop.core import game as game_mod
 from deckdrop.core.config import Config
 from deckdrop.core.game import GameInfo
+
+log = logging.getLogger(__name__)
 
 
 class Library:
@@ -68,3 +71,45 @@ class Library:
     def needs_wizard(self, path: Path) -> bool:
         """True if path is a directory without a deckdrop.toml."""
         return path.is_dir() and not (path / game_mod.TOML_FILENAME).exists()
+
+
+def relink_game_id(cfg: Config, library: Library, game: GameInfo, new_id: str) -> bool:
+    """Fix a locally-downloaded game whose ID doesn't match the host's (legacy bug).
+
+    Rewrites the game's own ID in its deckdrop.toml, renames the cached
+    .torrent and the local content-tracker state to the new ID (best effort,
+    only if the target doesn't already exist), and re-indexes it in the
+    library. Returns True if the ID was actually changed.
+    """
+    old_id = game.id
+    if old_id == new_id:
+        return False
+
+    game.id = new_id
+    try:
+        game_mod.save(game)
+    except OSError as exc:
+        log.warning("Could not save relinked game %s: %s", game.name, exc)
+        game.id = old_id
+        return False
+
+    old_torrent = cfg.torrent_cache / f"{old_id}.torrent"
+    new_torrent = cfg.torrent_cache / f"{new_id}.torrent"
+    if old_torrent.is_file() and not new_torrent.is_file():
+        try:
+            old_torrent.rename(new_torrent)
+        except OSError as exc:
+            log.warning("Could not rename cached torrent for %s: %s", game.name, exc)
+
+    old_state = cfg.content_state_dir / f"{old_id}.json"
+    new_state = cfg.content_state_dir / f"{new_id}.json"
+    if old_state.is_file() and not new_state.is_file():
+        try:
+            old_state.rename(new_state)
+        except OSError as exc:
+            log.warning("Could not rename content state for %s: %s", game.name, exc)
+
+    library.remove(old_id)
+    library.add(game)
+    log.info("Relinked game %s: %s -> %s (legacy ID fix)", game.name, old_id, new_id)
+    return True

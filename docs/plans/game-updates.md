@@ -283,6 +283,31 @@ Dateien unsichtbar), `diff_manifests` (inkl. moved, estimate), `plan_local_prep`
 + `delete_removed` auf `tmp_path`. `tests/test_game.py` erweitern: Legacy-toml lädt Defaults;
 Roundtrip `[content]`, `[[history]]`, `[sizes]`.
 
+### Abweichungen Phase 0/1 (umgesetzt 2026-09-26)
+
+- **Phase 0 bestätigt** mit libtorrent 2.1.1.0 (pip-Wheel): hybride v1+v2-Torrents per Default,
+  Pad-Dateien vorhanden, Datei-Ausrichtung auf Piece-Grenzen, `rename_file` (Torrent-Info und
+  Handle) funktioniert, `hash_for_piece`/`piece_size` wie erwartet, **`params.have_pieces`
+  funktioniert** → Phase 6 ist möglich. Siehe Kommentarblock oben in `deckdrop/core/torrent.py`
+  für Details. Einzige Abweichung: `ti.files()`, `create_torrent(fs, piece_size)` und
+  `rename_file()` sind in 2.1.1 als deprecated markiert (funktionieren aber weiterhin) – für einen
+  späteren libtorrent-Major-Bump ggf. auf die Nachfolge-APIs migrieren.
+- **`retarget_root`**: für den Magnet-Metadaten-Pfad (`_on_metadata_received`) wird abweichend vom
+  Wortlaut ("über `handle.rename_file`") die bereits vorhandene `retarget_root(lt, ti, folder_name)`
+  wiederverwendet, mit `ti = handle.torrent_file()`. Ein Test hat bestätigt, dass das Umbenennen
+  dieses `torrent_info`-Objekts sich sofort auf den Handle auswirkt (gleiche zugrunde liegende
+  Struktur) – ein separates `handle.rename_file(i, path)` ist dafür nicht nötig. Funktional
+  identisch zum Plan, aber ohne Code-Duplikation.
+- `content.diff_manifests`/`plan_local_prep`: "alte Datei bleibt im neuen Manifest" (→ `copies`)
+  kann laut der hier gewählten Zuordnungslogik nur auftreten, wenn **derselbe** alte Pfad als Quelle
+  für **mehrere** neue Pfade dient (doppelte Datei wird an zwei Stellen wiederhergestellt); der
+  erste Treffer wird per `move` (rename) aufgelöst, jeder weitere Treffer per `copy`. Das deckt den
+  in Phase 5 relevanten Fall ab, ohne die in Phase 0/1 nicht genutzten Piece-Mathematik-Funktionen
+  aus Phase 6 vorwegzunehmen.
+- `config.py`: Der neue `content_scan_interval` liegt unter einer neuen `[content]`-Sektion in
+  `config.toml` (`scan_interval`, Default 300), nicht unter `[transfer]`, um ihn sauber von den
+  Übertragungs-Einstellungen zu trennen.
+
 ---
 
 ## Phase 2 – Änderungen erkennen, veränderte Spiele sperren
@@ -674,8 +699,8 @@ funktioniert vollständig ohne.
 
 ### Checkliste
 
-- [ ] Phase 0 – libtorrent-API geprüft
-- [ ] Phase 1 – Datenmodell, Manifest, ID-Fix, Ordnername-Fix
+- [x] Phase 0 – libtorrent-API geprüft
+- [x] Phase 1 – Datenmodell, Manifest, ID-Fix, Ordnername-Fix
 - [ ] Phase 2 – Änderungserkennung + Sperre
 - [ ] Phase 3 – Update veröffentlichen
 - [ ] Phase 4 – Versionen im Netzwerk + Versionswahl beim Erst-Download

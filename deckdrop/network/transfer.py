@@ -501,8 +501,11 @@ class TransferManager:
         if not torrent_path.is_file() or not game_path.is_dir():
             log.warning("Cannot seed %s: missing torrent or game path", game_id)
             return
+        from deckdrop.core.torrent import retarget_root
+
         lt = _lt()
         ti = lt.torrent_info(str(torrent_path))
+        retarget_root(lt, ti, game_path.name)
         params = lt.add_torrent_params()
         params.ti = ti
         params.save_path = str(game_path.parent)
@@ -604,15 +607,21 @@ class TransferManager:
                 return params, "resume"
             self._resume_store.drop_resume(rec.download_id, rec.info_hash)
 
+        folder_name = Path(rec.dest_path).name or None
+
         cached = self._resume_store.find_metadata(rec.download_id, rec.info_hash)
         if cached is not None:
-            params = resume_mod.params_from_torrent_file(lt, cached, target, rec.info_hash)
+            params = resume_mod.params_from_torrent_file(
+                lt, cached, target, rec.info_hash, folder_name=folder_name
+            )
             if params is not None:
                 return params, "torrent"
 
         shared = self._cfg.torrent_cache / f"{rec.game_id}.torrent"
         if rec.info_hash and shared.is_file():
-            params = resume_mod.params_from_torrent_file(lt, shared, target, rec.info_hash)
+            params = resume_mod.params_from_torrent_file(
+                lt, shared, target, rec.info_hash, folder_name=folder_name
+            )
             if params is not None:
                 return params, "cache"
 
@@ -732,6 +741,17 @@ class TransferManager:
             return
         self._meta_wait_since.pop(did, None)
         lt = _lt()
+        try:
+            from deckdrop.core.torrent import retarget_root
+
+            get_info = getattr(handle, "torrent_file", None) or getattr(
+                handle, "get_torrent_info", None
+            )
+            ti = get_info() if get_info else None
+            if ti is not None:
+                retarget_root(lt, ti, h.dest_path.name)
+        except Exception as exc:
+            log.warning("retarget_root on metadata for %s failed: %s", did, exc)
         if not self._resume_store.has_metadata(did, rec.info_hash):
             blob = resume_mod.torrent_bytes_from_handle(lt, handle)
             if blob and self._resume_store.save_metadata(did, rec.info_hash, blob):
@@ -1012,12 +1032,19 @@ class TransferManager:
                 if changed:
                     game_mod.save(info)
             else:
+                # Keep the host's game ID (bug: this used to mint a fresh one,
+                # so the host and the receiver never recognised it as the same
+                # game). added_by stays the host's creator, not this receiver.
+                added_by = self._cfg.user_name
+                if remote_game:
+                    added_by = remote_game.get("added_by") or added_by
                 info = game_mod.create_new(
                     dest,
                     h.game_name,
-                    added_by=self._cfg.user_name,
+                    added_by=added_by,
                     steam_app_id=steam_app_id,
                 )
+                info.id = h.game_id
                 info.origin.peer_id = h.peer_id
                 info.origin.peer_name = h.peer_name
                 info.size_bytes = integrity.dir_size(dest)

@@ -221,10 +221,20 @@ def params_from_torrent_file(
     path: Path,
     save_path: str,
     expect_info_hash: str = "",
+    folder_name: str | None = None,
 ) -> object | None:
-    """Build add_torrent_params from a cached .torrent (metadata, no bitmap)."""
+    """Build add_torrent_params from a cached .torrent (metadata, no bitmap).
+
+    ``folder_name`` renames the torrent's top-level folder to the receiver's
+    destination folder name (see core.torrent.retarget_root) – the host's
+    folder name and the local dest folder can differ.
+    """
     try:
         info = lt.torrent_info(str(path))  # type: ignore[attr-defined]
+        if folder_name:
+            from deckdrop.core.torrent import retarget_root
+
+            retarget_root(lt, info, folder_name)
         params = lt.add_torrent_params()  # type: ignore[attr-defined]
         params.ti = info
         params.save_path = save_path

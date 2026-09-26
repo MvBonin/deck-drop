@@ -3,6 +3,38 @@
 
 libtorrent is an optional dependency. All public functions raise
 RuntimeError with a clear message if it's not installed.
+
+Phase 0 findings (libtorrent 2.1.1.0, pip wheel, verified 2026-09-26 in a
+throwaway venv – see docs/plans/game-updates.md "Phase 0"):
+
+- `lt.create_torrent(fs, piece_size)` builds hybrid v1+v2 torrents by default:
+  `torrent_info.info_hashes().has_v2()` is True (has_v1() is also True).
+  Confirmed. (The 2-arg constructor from `file_storage` is flagged
+  DeprecationWarning in 2.1.1 but still works; a future libtorrent release may
+  need the `torrent_creator`-based API instead.)
+- Pad files are inserted between non-aligned files and flagged:
+  `fs.file_flags(i) & lt.file_storage.flag_pad_file`. Confirmed.
+- Every non-pad file starts on a piece boundary:
+  `fs.file_offset(i) % ti.piece_length() == 0`. Confirmed (pad files
+  themselves are not aligned at their end, only non-pad files start aligned).
+- `ti.rename_file(i, new_path)` before `add_torrent` works (renames the
+  in-memory `torrent_info`, `.pad` entries keep their own paths). Confirmed,
+  though also flagged deprecated in 2.1.1 in favour of a `file_storage`-based
+  rename; kept since it is still functional and 1.x-compatible.
+- `handle.rename_file(i, path)` after a torrent has been added to a session
+  works the same way. Confirmed.
+- `ti.hash_for_piece(p)` returns the 20-byte v1 SHA1 for piece `p`;
+  `ti.piece_size(p)` returns that piece's size (last piece may be shorter).
+  Confirmed.
+- `params.have_pieces = [bool, ...]` (on `add_torrent_params`) is accepted
+  and read back unchanged. Confirmed – Phase 6 (`have_pieces` fast path) can
+  go ahead.
+- `ti.files()` is flagged deprecated in 2.1.1 (a newer file_storage accessor
+  exists) but still returns a fully working `file_storage`; used as-is here
+  since replacing it is out of scope for this phase.
+
+If a future libtorrent build removes something above, prefer the documented
+alternative in these notes and update this comment block with what changed.
 """
 
 from __future__ import annotations
@@ -82,6 +114,24 @@ def create_torrent_data(
     if on_progress:
         on_progress(0.98)
     return lt.bencode(t.generate())
+
+
+def retarget_root(lt: object, ti: object, folder_name: str) -> None:
+    """Rename the torrent's top-level folder so files land in <save_path>/<folder_name>/...
+
+    The host's torrent root is the host's own folder name, which can differ
+    from the receiver's dest folder name. Renaming files does not change the
+    info_hash (only the display path inside the torrent metadata), so this is
+    safe to call on any torrent_info, on the host or the receiver.
+    """
+    fs = ti.files()
+    for i in range(fs.num_files()):
+        old = fs.file_path(i).replace("\\", "/")
+        parts = old.split("/", 1)
+        if parts[0] == folder_name:
+            continue
+        new_path = folder_name + ("/" + parts[1] if len(parts) > 1 else "")
+        ti.rename_file(i, new_path)
 
 
 def make_magnet(torrent_data: bytes) -> tuple[str, str]:

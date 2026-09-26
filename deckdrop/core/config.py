@@ -39,6 +39,9 @@ _DEFAULTS: dict[str, Any] = {
         "max_connections": 50,
         "seed_after_download": True,
     },
+    "content": {
+        "scan_interval": 300,
+    },
     "service": {
         "autostart": False,
         "appimage_path": "",
@@ -98,6 +101,15 @@ class Config:
     def downloads_state_path(self) -> Path:
         base = Path(self._data["paths"]["torrent_cache"]).expanduser().parent
         return base / "downloads-state.json"
+
+    @property
+    def content_state_dir(self) -> Path:
+        """Local (unshared) per-game content-tracker state: <id>.json files."""
+        return self.torrent_cache.parent / "content"
+
+    @property
+    def content_scan_interval(self) -> int:
+        return self._data.get("content", {}).get("scan_interval", 300)
 
     @property
     def game_paths(self) -> list[Path]:
