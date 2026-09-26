@@ -96,3 +96,32 @@ def test_update_button_visible_while_hashing(page: Page, live_server_url: str) -
     expect(card.get_by_text("Update verfügbar: 1.0.5")).to_be_visible(timeout=10_000)
     expect(card.get_by_role("button", name="Aktualisieren…")).to_be_visible()
     expect(card.get_by_text("Game-Hashes berechnen…")).to_be_visible()
+
+
+def test_downloads_show_update_preparation(page: Page, live_server_url: str) -> None:
+    """An update that is still reading existing files shows its own phase
+    (and can be paused) instead of looking like a frozen download."""
+    dl = {
+        "id": "u1",
+        "game_id": "dawn1",
+        "game_name": "Dawnwalker",
+        "peer_id": "pc",
+        "peer_name": "MVB Desktop",
+        "status": "verifying",
+        "progress": 0.0,
+        "speed_bytes_sec": 0,
+        "downloaded_bytes": 0,
+        "total_bytes": 0,
+        "num_peers": 0,
+        "phase": "preparing",
+        "phase_progress": 0.42,
+        "kind": "update",
+        "target_version_label": "1.0.5",
+    }
+    page.route("**/api/downloads", lambda route: route.fulfill(json=[dl]))
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    page.locator("nav.nav").get_by_text("Downloads").click()
+
+    expect(page.get_by_text("Update: Dawnwalker → 1.0.5")).to_be_visible(timeout=10_000)
+    expect(page.get_by_text("Prüfe vorhandene Dateien 42 %")).to_be_visible()
+    expect(page.get_by_role("button", name="Pause")).to_be_visible()

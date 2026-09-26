@@ -39,7 +39,8 @@ class _Peer:
 
 
 @pytest.mark.slow
-def test_update_transfers_only_changed_pieces(tmp_path, monkeypatch):
+@pytest.mark.parametrize("background", [False, True], ids=["inline", "background"])
+def test_update_transfers_only_changed_pieces(tmp_path, monkeypatch, background):
     lt = pytest.importorskip("libtorrent")
 
     from deckdrop.api import state as app_state
@@ -194,7 +195,17 @@ def test_update_transfers_only_changed_pieces(tmp_path, monkeypatch):
 
         # -- Receiver applies the update via the real TransferManager path --
         peers = [_Peer("host", "Alice", "127.0.0.1", host_cfg.torrent_port)]
-        download_id = recv_tm.start_update(recv_info, peers, torrent_v2, manifest_v2)
+        download_id = recv_tm.start_update(
+            recv_info, peers, torrent_v2, manifest_v2, background=background
+        )
+        if background:
+            # What the poll loop does: wait for the prep thread, then add.
+            prep = recv_tm._update_preps[download_id]
+            deadline = time.monotonic() + 15.0
+            while not prep.done and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert prep.done and prep.error is None
+            recv_tm._finish_update_preps()
 
         h = recv_tm._handles[download_id]
         rec = recv_tm._paused[download_id]

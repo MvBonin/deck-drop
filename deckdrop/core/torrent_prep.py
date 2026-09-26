@@ -77,6 +77,31 @@ def migrate_stale_caches(library: object, cfg: object, transfer: object | None) 
     return migrated
 
 
+def _fresh_game(s: object, game_id: str) -> object | None:
+    """The game as it is on disk *now*, also put back into the library.
+
+    Library objects go stale: `Library.reload()` (every GET /api/games)
+    replaces them, and a publish saves its own copy. Saving a stale object
+    here only to change the torrent fields wrote an old manifest back over a
+    just-published one – the game went straight back to "modified".
+    """
+    from deckdrop.core import game as game_mod
+
+    g = s.library.get(game_id)  # type: ignore[attr-defined]
+    if g is None:
+        return None
+    try:
+        fresh = game_mod.load_from_path(g.path)
+    except Exception as exc:
+        log.debug("Could not reload %s from disk: %s", game_id, exc)
+        return g
+    if fresh is None or fresh.id != game_id:
+        return g
+    fresh.available = g.available
+    s.library.add(fresh)  # type: ignore[attr-defined]
+    return fresh
+
+
 def restore_from_cache(game_id: str) -> bool:
     """
     Load magnet/info_hash from an existing .torrent cache into deckdrop.toml.
@@ -96,6 +121,7 @@ def restore_from_cache(game_id: str) -> bool:
         return False
 
     try:
+        g = _fresh_game(s, game_id) or g
         torrent_bytes = cache.read_bytes()
         magnet, info_hash = make_magnet(torrent_bytes)
         g.torrent.magnet = magnet
@@ -141,6 +167,7 @@ def invalidate_torrent(game_id: str) -> None:
     except OSError as exc:
         log.warning("Could not delete torrent cache for %s: %s", game_id, exc)
 
+    g = _fresh_game(s, game_id) or g
     if g.torrent.magnet or g.torrent.info_hash:
         g.torrent.magnet = ""
         g.torrent.info_hash = ""
@@ -224,7 +251,9 @@ def _prepare(game_id: str, force: bool = False) -> None:
 
     try:
         s = app_state.get()
-        g = s.library.get(game_id)
+        # Fresh from disk: the torrent must list the files of the manifest
+        # that was just published, not those of a stale library object.
+        g = _fresh_game(s, game_id)
         if not g:
             return
         if not force and (restore_from_cache(game_id) or g.torrent.magnet):
@@ -253,6 +282,9 @@ def _prepare(game_id: str, force: bool = False) -> None:
             on_progress=lambda p: _set_progress(game_id, p),
         )
         magnet, info_hash = make_magnet(torrent_bytes)
+        # Re-read before saving: hashing took a while, and anything written
+        # to deckdrop.toml meanwhile (e.g. a metadata sync) must survive.
+        g = _fresh_game(s, game_id) or g
         g.torrent.magnet = magnet
         g.torrent.info_hash = info_hash
         game_mod.save(g)

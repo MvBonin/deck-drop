@@ -88,6 +88,8 @@ def test_update_cancels_running_baseline_hash(app_with_hashing_game, monkeypatch
     assert time.monotonic() - t0 < 5  # did not wait for the (10 s) hash
     assert not hasher.is_alive()
     transfer.start_update.assert_called_once()
+    # Preparation runs in the background – the request doesn't wait for it.
+    assert transfer.start_update.call_args.kwargs == {"background": True}
     game_arg = transfer.start_update.call_args.args[0]
     assert game_arg.files == {}  # old version never got hashed
     assert game_mod.load_from_path(info.path).files == {}

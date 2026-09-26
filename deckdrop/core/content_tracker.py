@@ -132,6 +132,31 @@ class ContentTracker:
     def get_entry(self, game_id: str) -> dict[str, Any]:
         return dict(self._entries.get(game_id, {}))
 
+    def stat_suspects(self, game_id: str) -> set[str]:
+        """Files that may differ from the manifest, by stat() alone – read-only.
+
+        Used before an update instead of `scan()`: no hashing (a file with a
+        new mtime is simply read by the update's piece check anyway) and no
+        state change (a failed update start must not leave the game
+        "modified").
+        """
+        g = self._library.get(game_id)
+        if not g or not g.files:
+            return set()
+        snapshot = dict(self._entries.get(game_id, {}).get("snapshot") or {})
+        result = content.compare_snapshot(g.path, g.files, snapshot, g.content.ignore)
+        suspects = {*result.changed, *result.mtime_only, *result.removed}
+        for rel, size in g.sizes.items():
+            if rel in suspects:
+                continue
+            path = content.safe_join(g.path, rel)
+            try:
+                if path is not None and path.stat().st_size != size:
+                    suspects.add(rel)
+            except OSError:
+                suspects.add(rel)
+        return suspects
+
     def change_lists(self, game_id: str) -> dict[str, list[str]]:
         e = self._entries.get(game_id, {})
         return {
@@ -379,6 +404,7 @@ class ContentTracker:
         if not g.content.content_hash:
             g.content.content_hash = content.compute_content_hash(files, sizes)
         game_mod.save(g)
+        self._library.add(g)
         entry = self._entries.get(g.id)
         if entry and entry.pop("pending_hash_reason", None) is not None:
             self._save_entry(g.id, entry)
@@ -517,11 +543,27 @@ class ContentTracker:
             name=f"content-publish-{game_id}",
         ).start()
 
+    def _fresh(self, game_id: str) -> game_mod.GameInfo | None:
+        """The game as it is on disk now, put back into the library (library
+        objects go stale – every GET /api/games reloads them from disk)."""
+        g = self._library.get(game_id)
+        if not g:
+            return None
+        try:
+            fresh = game_mod.load_from_path(g.path)
+        except Exception:
+            return g
+        if fresh is None or fresh.id != game_id:
+            return g
+        fresh.available = g.available
+        self._library.add(fresh)
+        return fresh
+
     def _publish_worker(
         self, game_id: str, version_label: str, note: str, exclude: list[str]
     ) -> None:
         try:
-            g = self._library.get(game_id)
+            g = self._fresh(game_id)
             if not g:
                 return
             self.set_state(game_id, "publishing")
@@ -628,6 +670,8 @@ class ContentTracker:
             g.sizes = sizes
             g.size_bytes = sum(sizes.values())
             game_mod.save(g)
+            # Scans and the torrent rebuild read the library, not the disk.
+            self._library.add(g)
 
             snapshot = content.take_snapshot(g.path, files.keys())
             self.set_state(
@@ -686,6 +730,7 @@ class ContentTracker:
                 entry.note = note
             break
         game_mod.save(g)
+        self._library.add(g)
         return True
 
     def _reseed(self, game_id: str, game_path: Path) -> None:

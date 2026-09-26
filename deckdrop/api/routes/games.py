@@ -706,12 +706,9 @@ async def _update_game(
         g = s.library.get(game_id) or g
     elif state in ("publishing", "updating"):
         raise HTTPException(409, f"Spiel ist gerade beschäftigt ({state})")
-    # Fresh scan so the Phase 6 fast path never trusts a stale "unchanged"
-    # classification (a file edited since the last periodic scan). Without a
-    # baseline there is nothing to compare – and scan() would start the full
-    # hash we just skipped, synchronously in this request.
-    if g.files:
-        await asyncio.to_thread(tracker.scan, game_id)
+    # No scan here any more: the update's piece check does a fresh stat()
+    # comparison itself (ContentTracker.stat_suspects) and reads suspicious
+    # files anyway – hashing them here first only delayed the response.
 
     peers = s.peer_registry.peers_for_version(game_id, req.version_key)
     if not peers:
@@ -726,10 +723,10 @@ async def _update_game(
         raise HTTPException(502, "Manifest oder Torrent-Datei vom Peer nicht abrufbar")
 
     try:
-        # start_update does blocking file I/O (local prep, Phase 6 piece
-        # hashing) – never run it directly on the event loop thread.
+        # Returns right away: local prep + reading existing pieces run in the
+        # background and show up in "Downloads" as phase "preparing".
         download_id = await asyncio.to_thread(
-            s.transfer.start_update, g, peers, torrent_bytes, manifest
+            s.transfer.start_update, g, peers, torrent_bytes, manifest, background=True
         )
     except Exception as exc:
         raise HTTPException(500, f"Update konnte nicht gestartet werden: {exc}") from exc

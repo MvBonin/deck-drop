@@ -129,7 +129,14 @@ export function MyGames({ wsEvent, showToast }) {
     if (wsEvent.event === 'download_progress') {
       // Harmless to record progress for a non-updating game id here – GameCard
       // only renders it while content_state === 'updating'.
-      setUpdateProgress(p => ({ ...p, [id]: wsEvent.data.progress ?? 0 }));
+      setUpdateProgress(p => ({
+        ...p,
+        [id]: {
+          progress: wsEvent.data.progress ?? 0,
+          phase: wsEvent.data.phase,
+          phase_progress: wsEvent.data.phase_progress ?? 0,
+        },
+      }));
     }
     if (wsEvent.event === 'game_updated') {
       setUpdateProgress(p => { const n = { ...p }; delete n[id]; return n; });
@@ -244,7 +251,7 @@ export function MyGames({ wsEvent, showToast }) {
         <${UpdateGame}
           game=${updateGame}
           onClose=${() => setUpdateGame(null)}
-          onStarted=${() => { setUpdateGame(null); showToast('Update wird geladen…'); load(); }}
+          onStarted=${() => { setUpdateGame(null); showToast('Update gestartet – Fortschritt unter „Downloads“'); load(); }}
         />
       `}
     </div>`;

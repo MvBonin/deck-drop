@@ -152,3 +152,38 @@ def test_build_have_pieces_locally_corrupted_unchanged_file_excluded(tmp_path):
     # Used correctly as "changed" instead: the mismatch is actually detected.
     verified = build_have_pieces(lt, ti, game, [], ["save.bin"])
     assert verified == [False]
+
+
+def test_build_have_pieces_reports_progress_and_can_be_cancelled(tmp_path):
+    import threading
+
+    lt = pytest.importorskip("libtorrent")
+
+    from deckdrop.core.torrent import (
+        PieceCheckCancelled,
+        build_have_pieces,
+        create_torrent_data,
+        retarget_root,
+    )
+
+    game = tmp_path / "Game"
+    piece = 1024 * 1024
+    _make_game(game, {"a.bin": b"A" * (4 * piece), "b.bin": b"B" * (2 * piece)})
+    ti = lt.torrent_info(lt.bdecode(create_torrent_data(game)))
+    retarget_root(lt, ti, "Game")
+
+    seen: list[float] = []
+    have = build_have_pieces(lt, ti, game, [], ["a.bin", "b.bin"], on_progress=seen.append)
+    assert all(have[:6])
+    assert seen and seen[-1] == pytest.approx(1.0)
+    assert seen == sorted(seen)
+
+    cancel = threading.Event()
+
+    def _cancel_after_first(frac: float) -> None:
+        cancel.set()
+
+    with pytest.raises(PieceCheckCancelled):
+        build_have_pieces(
+            lt, ti, game, [], ["a.bin", "b.bin"], on_progress=_cancel_after_first, cancel=cancel
+        )

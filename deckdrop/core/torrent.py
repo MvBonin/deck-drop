@@ -161,12 +161,19 @@ def retarget_root(lt: object, ti: object, folder_name: str) -> None:
         ti.rename_file(i, new_path)
 
 
+class PieceCheckCancelled(Exception):
+    """Raised by `build_have_pieces` when its `cancel` event is set."""
+
+
 def build_have_pieces(
     lt: object,
     ti: object,
     root: Path,
     unchanged_rels: list[str] | set[str],
     changed_rels: list[str] | set[str],
+    *,
+    on_progress: Callable[[float], None] | None = None,
+    cancel: object | None = None,  # threading.Event
 ) -> list[bool]:
     """Phase 6 "have_pieces" fast path (docs/plans/game-updates.md).
 
@@ -179,6 +186,9 @@ def build_have_pieces(
     append at the end) are still marked present. Pieces of any other file
     (added, or not present locally) are left `False`. Never raises for a
     single unreadable file – that file's pieces are just left `False`.
+
+    `on_progress(fraction)` reports the share of to-be-read pieces checked so
+    far; setting `cancel` stops the check with `PieceCheckCancelled`.
     """
     from deckdrop.core.content import pieces_for_file, safe_join
 
@@ -187,6 +197,7 @@ def build_have_pieces(
     piece_length = ti.piece_length()
     have = [False] * ti.num_pieces()
 
+    to_read: list[tuple[str, Path, int, int, range]] = []
     fs = ti.files()
     for i in range(fs.num_files()):
         if fs.file_flags(i) & lt.file_storage.flag_pad_file:
@@ -207,10 +218,27 @@ def build_have_pieces(
             local_path = safe_join(root, rel)
             if local_path is None or not local_path.is_file():
                 continue
-            try:
-                _verify_changed_file_pieces(ti, local_path, offset, size, piece_range, have)
-            except OSError as exc:
-                log.debug("have_pieces: could not read %s: %s", rel, exc)
+            to_read.append((rel, local_path, offset, size, piece_range))
+
+    total = sum(len(r) for *_, r in to_read) or 1
+    done = 0
+    last_reported = -1.0
+
+    def _tick() -> None:
+        nonlocal done, last_reported
+        if cancel is not None and cancel.is_set():
+            raise PieceCheckCancelled()
+        done += 1
+        frac = done / total
+        if on_progress is not None and (frac - last_reported >= 0.005 or done == total):
+            last_reported = frac
+            on_progress(frac)
+
+    for rel, local_path, offset, size, piece_range in to_read:
+        try:
+            _verify_changed_file_pieces(ti, local_path, offset, size, piece_range, have, _tick)
+        except OSError as exc:
+            log.debug("have_pieces: could not read %s: %s", rel, exc)
 
     return have
 
@@ -271,11 +299,14 @@ def _verify_changed_file_pieces(
     file_size: int,
     piece_range: range,
     have: list[bool],
+    tick: Callable[[], None] | None = None,
 ) -> None:
     import hashlib
 
     with open(local_path, "rb") as fh:
         for p in piece_range:
+            if tick is not None:
+                tick()
             piece_size = ti.piece_size(p)
             piece_start = p * ti.piece_length()
             file_pos = piece_start - file_offset

@@ -31,6 +31,11 @@ const ACTIVE_DOWNLOAD_STATUSES = new Set([
  * file check used to look like a frozen download.
  */
 function statusLabel(dl) {
+  if (dl.phase === 'preparing') {
+    // Update: reading the files already on disk to find reusable pieces.
+    const pct = Math.round((dl.phase_progress || 0) * 100);
+    return `🔍 Prüfe vorhandene Dateien ${pct} %`;
+  }
   if (dl.status === 'queued' || dl.status === 'downloading') {
     if (dl.phase === 'checking') {
       const pct = Math.round((dl.phase_progress || 0) * 100);
@@ -80,11 +85,11 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
   const fillClass = dl.status === 'done' || dl.status === 'seeding' ? 'done'
                   : dl.status === 'error' ? 'error'
                   : dl.status === 'paused' ? '' : '';
-  const checking = dl.phase === 'checking';
+  const checking = dl.phase === 'checking' || dl.phase === 'preparing';
   const statusColor = checking
     ? 'var(--accent)'
     : STATUS_COLOR[dl.status] || 'var(--text-dim)';
-  const canPause = dl.status === 'downloading' || dl.status === 'queued';
+  const canPause = dl.status === 'downloading' || dl.status === 'queued' || dl.phase === 'preparing';
   const canResume = dl.status === 'paused';
   const canRetry = dl.status === 'error';
   const canRemove = true;
