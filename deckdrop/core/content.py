@@ -69,10 +69,17 @@ def compute_content_hash(files: dict[str, str], sizes: dict[str, int]) -> str:
 
 
 def take_snapshot(root: Path, rels: Iterable[str]) -> dict[str, list[int]]:
-    """rel -> [st_size, st_mtime_ns]; missing files are left out."""
+    """rel -> [st_size, st_mtime_ns]; missing files are left out.
+
+    `rels` usually comes straight from a manifest, which may be a peer's
+    (untrusted) – a traversal-y `rel` is silently skipped via `safe_join`
+    rather than stat()ing outside `root`.
+    """
     snapshot: dict[str, list[int]] = {}
     for rel in rels:
-        path = root / rel
+        path = safe_join(root, rel)
+        if path is None:
+            continue
         try:
             st = path.stat()
         except OSError:
@@ -100,7 +107,12 @@ def compare_snapshot(
     patterns = list(patterns)
 
     for rel in manifest_files:
-        path = root / rel
+        path = safe_join(root, rel)
+        if path is None:
+            # Untrusted/malformed manifest path – never stat outside root;
+            # treat it like a missing file rather than silently ignoring it.
+            result.removed.append(rel)
+            continue
         try:
             st = path.stat()
         except OSError:
@@ -225,7 +237,9 @@ def plan_local_prep(
         new_size = new_sizes.get(rel)
         if new_size is None:
             continue
-        path = root / rel
+        path = safe_join(root, rel)
+        if path is None:
+            continue
         try:
             current_size = path.stat().st_size
         except OSError:
@@ -240,6 +254,23 @@ def plan_local_prep(
         plan.deletes_after.append(rel)
 
     return plan
+
+
+def pieces_for_file(file_offset: int, file_size: int, piece_length: int) -> range:
+    """Piece indices touched by a file's byte range (Phase 6 "have_pieces" fast path).
+
+    Files are always aligned to a piece boundary (`file_offset % piece_length
+    == 0`, hybrid v1+v2 torrents – see docs/plans/game-updates.md Phase 0), so
+    a file only ever *shares* its very last piece with trailing pad bytes, it
+    never shares its first piece with a preceding file. A zero-size file
+    occupies no piece at all.
+    """
+    if file_size <= 0:
+        first = file_offset // piece_length
+        return range(first, first)
+    first = file_offset // piece_length
+    last = (file_offset + file_size - 1) // piece_length
+    return range(first, last + 1)
 
 
 def safe_join(root: Path, rel: str) -> Path | None:

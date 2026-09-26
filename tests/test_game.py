@@ -185,3 +185,32 @@ def test_apply_manifest_keep_local_meta_true_preserves_id(tmp_path):
     assert info.name == "Local Name"
     assert info.content.revision == 2
     assert info.files == {"a.bin": "hash1"}
+
+
+def test_apply_manifest_drops_path_traversal_entries(tmp_path):
+    """A peer manifest is untrusted: a relpath that would resolve outside the
+    game folder must never end up in files/sizes, since those later drive
+    stat()/hash_file()/open() calls (docs/plans/game-updates.md
+    "Stolperfallen": paths from peer manifests are untrusted).
+    """
+    info = game_mod.create_new(tmp_path, name="Local Name", added_by="me")
+    manifest = {
+        "id": "host1234",
+        "content": {"revision": 2},
+        "history": [],
+        "files": {
+            "a.bin": "hash1",
+            "../outside.bin": "hash_evil",
+            "/etc/passwd": "hash_evil2",
+            "sub/../../escape.bin": "hash_evil3",
+        },
+        "sizes": {
+            "a.bin": 5,
+            "../outside.bin": 5,
+            "/etc/passwd": 5,
+            "sub/../../escape.bin": 5,
+        },
+    }
+    game_mod.apply_manifest(info, manifest, keep_local_meta=True)
+    assert info.files == {"a.bin": "hash1"}
+    assert info.sizes == {"a.bin": 5}

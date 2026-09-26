@@ -108,6 +108,22 @@ def test_compare_snapshot_ignored_files_invisible(tmp_path):
     assert result.changed == ["game.bin"]
 
 
+def test_compare_snapshot_rejects_path_traversal_manifest_entry(tmp_path):
+    """An untrusted (peer) manifest with a traversal path must never be
+    stat()ed outside root – it's treated like a missing file (-> removed),
+    never surfacing in changed/mtime_only."""
+    manifest_files = {"../outside.bin": "h1", "/etc/passwd": "h2"}
+    result = content.compare_snapshot(tmp_path, manifest_files, {}, [])
+    assert sorted(result.removed) == ["../outside.bin", "/etc/passwd"]
+    assert result.changed == []
+    assert result.mtime_only == []
+
+
+def test_take_snapshot_rejects_path_traversal(tmp_path):
+    snapshot = content.take_snapshot(tmp_path, ["../outside.bin", "/etc/passwd"])
+    assert snapshot == {}
+
+
 def test_diff_manifests_added_changed_removed_unchanged():
     old_files = {"a": "h1", "b": "h2", "c": "h3"}
     old_sizes = {"a": 1, "b": 2, "c": 3}
@@ -197,3 +213,23 @@ def test_safe_join_accepts_normal_relpath(tmp_path):
 def test_safe_join_never_raises_on_weird_input(tmp_path):
     assert content.safe_join(tmp_path, "") is None
     assert content.safe_join(tmp_path, "\\\\server\\share") is None
+
+
+def test_pieces_for_file_aligned_single_piece():
+    # A file starting exactly on a piece boundary, smaller than one piece.
+    assert content.pieces_for_file(0, 500, 1024) == range(0, 1)
+    assert content.pieces_for_file(1024, 500, 1024) == range(1, 2)
+
+
+def test_pieces_for_file_spans_multiple_pieces():
+    # Starts on piece 2's boundary, spans into piece 4.
+    assert content.pieces_for_file(2048, 2500, 1024) == range(2, 5)
+
+
+def test_pieces_for_file_exact_multiple_of_piece_length():
+    assert content.pieces_for_file(0, 2048, 1024) == range(0, 2)
+
+
+def test_pieces_for_file_empty_file_touches_no_piece():
+    r = content.pieces_for_file(4096, 0, 1024)
+    assert list(r) == []

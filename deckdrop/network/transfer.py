@@ -689,58 +689,73 @@ class TransferManager:
 
         # 2. Add the retargeted torrent in place (no seed_mode – libtorrent
         # checks the files that are already there and only fetches the rest).
-        info_hash = ""
-        ti = None
+        # Everything from here on can fail (bad torrent bytes, add_torrent
+        # rejecting a torrent-less params, ...); local prep already ran and
+        # the tracker is already "updating", so on any failure we must revert
+        # it to "modified" instead of leaving the game stuck "updating"
+        # forever with no download to ever finalize it (see "Stolperfallen").
         try:
-            ti = lt.torrent_info(lt.bdecode(torrent_bytes))
-            retarget_root(lt, ti, game_path.name)
-            info_hash = str(ti.info_hashes().v1).lower()
-        except Exception as exc:
-            log.warning("Update torrent for %s unusable: %s", game.id, exc)
+            info_hash = ""
+            ti = None
+            try:
+                ti = lt.torrent_info(lt.bdecode(torrent_bytes))
+                retarget_root(lt, ti, game_path.name)
+                info_hash = str(ti.info_hashes().v1).lower()
+            except Exception as exc:
+                log.warning("Update torrent for %s unusable: %s", game.id, exc)
 
-        rec = _PersistedRecord(
-            download_id=download_id,
-            game_id=game.id,
-            game_name=game.name,
-            peer_id=primary.peer_id,
-            peer_name=primary.name,
-            magnet="",
-            dest_path=str(game_path),
-            started_at=time.time(),
-            peer_address=primary.address,
-            info_hash=info_hash,
-            extra_peer_ids=list(dict.fromkeys(extra_peer_ids)),
-            expected_content_hash=content_block.get("content_hash", ""),
-            kind="update",
-            local_game_path=str(game_path),
-            target_version_label=target_version_label,
-        )
-        if torrent_bytes:
-            self._resume_store.save_torrent(download_id, info_hash, torrent_bytes)
-        self._resume_store.save_manifest(download_id, manifest)
+            if ti is None:
+                raise RuntimeError("update torrent has no usable metadata")
 
-        params = lt.add_torrent_params()
-        params.ti = ti
-        params.save_path = str(game_path.parent)
-        handle = self._session.add_torrent(params)
+            rec = _PersistedRecord(
+                download_id=download_id,
+                game_id=game.id,
+                game_name=game.name,
+                peer_id=primary.peer_id,
+                peer_name=primary.name,
+                magnet="",
+                dest_path=str(game_path),
+                started_at=time.time(),
+                peer_address=primary.address,
+                info_hash=info_hash,
+                extra_peer_ids=list(dict.fromkeys(extra_peer_ids)),
+                expected_content_hash=content_block.get("content_hash", ""),
+                kind="update",
+                local_game_path=str(game_path),
+                target_version_label=target_version_label,
+            )
+            if torrent_bytes:
+                self._resume_store.save_torrent(download_id, info_hash, torrent_bytes)
+            self._resume_store.save_manifest(download_id, manifest)
 
-        handle.connect_peer((primary.address, self._cfg.torrent_port))
-        self._connect_extra_peers(handle, rec)
+            params = lt.add_torrent_params()
+            params.ti = ti
+            params.save_path = str(game_path.parent)
+            self._apply_have_pieces_fast_path(lt, ti, game_path, diff, tracker, game.id, params)
+            handle = self._session.add_torrent(params)
 
-        self._handles[download_id] = _Handle(
-            download_id=download_id,
-            game_id=game.id,
-            game_name=game.name,
-            peer_id=primary.peer_id,
-            peer_name=primary.name,
-            handle=handle,
-            dest_path=game_path,
-        )
-        self._paused[download_id] = rec
-        if info_hash:
-            self._by_info_hash[info_hash] = download_id
-        self._user_paused.discard(download_id)
-        self._save_state()
+            handle.connect_peer((primary.address, self._cfg.torrent_port))
+            self._connect_extra_peers(handle, rec)
+
+            self._handles[download_id] = _Handle(
+                download_id=download_id,
+                game_id=game.id,
+                game_name=game.name,
+                peer_id=primary.peer_id,
+                peer_name=primary.name,
+                handle=handle,
+                dest_path=game_path,
+            )
+            self._paused[download_id] = rec
+            if info_hash:
+                self._by_info_hash[info_hash] = download_id
+            self._user_paused.discard(download_id)
+            self._save_state()
+        except Exception:
+            if tracker is not None:
+                tracker.set_state(game.id, "modified", pending_update=None)
+            raise
+
         log.info(
             "Update started: %s (%s) from %s → %s",
             game.name,
@@ -749,6 +764,49 @@ class TransferManager:
             target_version_label,
         )
         return download_id
+
+    def _apply_have_pieces_fast_path(
+        self,
+        lt: object,
+        ti: object,
+        game_path: Path,
+        diff: object,  # content.ManifestDiff
+        tracker: object | None,
+        game_id: str,
+        params: object,
+    ) -> None:
+        """Phase 6: mark pieces of already-correct files present so libtorrent
+        skips re-checking/re-downloading them. Best effort – any problem here
+        just falls back to Phase 5 behaviour (no `have_pieces`, full recheck).
+        """
+        from deckdrop.core.torrent import build_have_pieces
+
+        try:
+            tracker_suspect: set[str] = set()
+            if tracker is not None:
+                lists = tracker.change_lists(game_id)
+                tracker_suspect = set(lists.get("changed", [])) | set(lists.get("removed", []))
+
+            # "unchanged" per docs/plans/game-updates.md Phase 6: same hash in
+            # old and new manifest *and* the local scan didn't flag the file
+            # as changed/removed (otherwise a locally corrupted-but-untouched
+            # file would be trusted without ever being read).
+            unchanged_rels = [r for r in diff.unchanged if r not in tracker_suspect]
+            # Moved files were just renamed on disk by apply_local_prep – verify
+            # them by reading (like "changed") rather than trusting them
+            # unread, in case the rename silently didn't happen (e.g. source
+            # missing).
+            changed_rels = [
+                *(r for r in diff.changed if r not in tracker_suspect),
+                *(r for r in diff.unchanged if r in tracker_suspect),
+                *diff.moved.keys(),
+            ]
+
+            have_pieces = build_have_pieces(lt, ti, game_path, unchanged_rels, changed_rels)
+            if len(have_pieces) == ti.num_pieces():
+                params.have_pieces = have_pieces
+        except Exception as exc:
+            log.warning("have_pieces fast path failed for %s, falling back: %s", game_id, exc)
 
     def _content_tracker(self) -> object | None:
         """Fail-open accessor for the ContentTracker, like `_is_shareable`."""
@@ -1303,10 +1361,70 @@ class TransferManager:
         except Exception as exc:
             log.warning("Could not register downloaded game at %s: %s", dest, exc)
 
-    async def _finalize_update(self, h: _Handle, rec: _PersistedRecord) -> None:
+    async def _verify_update_or_recheck(
+        self, h: _Handle, game_path: Path, manifest: dict, pending: dict
+    ) -> bool:
+        """Phase 6 safety net: blake2b-verify changed/added files against the
+        manifest before trusting the fast path's `have_pieces` bitmap. This is
+        why a "changed" verdict from the last local scan excludes a file from
+        `unchanged` even if its manifest hash matches – an unchanged-looking
+        but locally corrupted file would otherwise be trusted here too, since
+        this only re-checks what the *manifest diff* calls changed/added.
+
+        A mismatch means a piece was wrongly marked present (or the file was
+        corrupted by something else mid-update); force a libtorrent recheck
+        and let the download run to completion again instead of finalizing
+        with bad data on disk (docs/plans/game-updates.md Phase 6).
+        """
+        from deckdrop.core import content, integrity
+
+        old = pending.get("old_manifest") or {}
+        new_files: dict[str, str] = manifest.get("files") or {}
+        new_sizes: dict[str, int] = manifest.get("sizes") or {}
+        diff = content.diff_manifests(
+            old.get("files") or {}, old.get("sizes") or {}, new_files, new_sizes
+        )
+        to_verify = [*diff.changed, *diff.added]
+        if not to_verify:
+            return True
+
+        def _check() -> list[str]:
+            bad = []
+            for rel in to_verify:
+                expected = new_files.get(rel)
+                local_path = content.safe_join(game_path, rel)
+                if expected is None or local_path is None or not local_path.is_file():
+                    bad.append(rel)
+                    continue
+                if integrity.hash_file(local_path) != expected:
+                    bad.append(rel)
+            return bad
+
+        mismatches = await asyncio.to_thread(_check)
+        if not mismatches:
+            return True
+
+        log.warning(
+            "Update verification failed for %d file(s) at %s, forcing recheck: %s",
+            len(mismatches),
+            game_path,
+            mismatches[:10],
+        )
+        try:
+            h.handle.force_recheck()
+        except Exception as exc:
+            log.warning("force_recheck failed for %s: %s", h.game_id, exc)
+        return False
+
+    async def _finalize_update(self, h: _Handle, rec: _PersistedRecord) -> bool:
         """Finish an in-place update: delete removed files, rewrite deckdrop.toml
         with the same game id, cache the new torrent, and resume seeding
         (docs/plans/game-updates.md "5.2.4").
+
+        Returns True once finalized. Returns False if the Phase 6 safety-net
+        verification found a mismatch and triggered `force_recheck()` instead
+        – the caller must let the download run to completion again and retry
+        `_finalize_update` afterwards rather than treating it as done.
         """
         from deckdrop.core import content, integrity
         from deckdrop.core import game as game_mod
@@ -1319,48 +1437,62 @@ class TransferManager:
         if tracker is not None:
             pending = tracker.get_entry(h.game_id).get("pending_update") or {}
 
-        deletes_after = pending.get("deletes_after") or []
-        content.delete_removed(game_path, deletes_after)
+        if not await self._verify_update_or_recheck(h, game_path, manifest, pending):
+            return False
 
-        g = game_mod.load_from_path(game_path)
-        if g is None:
-            log.warning("Update finalize: deckdrop.toml missing at %s", game_path)
+        try:
+            deletes_after = pending.get("deletes_after") or []
+            content.delete_removed(game_path, deletes_after)
+
+            g = game_mod.load_from_path(game_path)
+            if g is None:
+                log.warning("Update finalize: deckdrop.toml missing at %s", game_path)
+                if tracker is not None:
+                    tracker.set_state(h.game_id, "modified", pending_update=None)
+                return True
+
+            game_mod.apply_manifest(g, manifest, keep_local_meta=True)
+            g.origin.peer_id = h.peer_id
+            g.origin.peer_name = h.peer_name
+            g.size_bytes = sum(g.sizes.values()) if g.sizes else integrity.dir_size(game_path)
+            game_mod.save(g)
+
+            cached_torrent = self._resume_store.find_metadata(h.download_id, rec.info_hash)
+            if cached_torrent is not None:
+                try:
+                    data = cached_torrent.read_bytes()
+                    cache_path = self._cfg.torrent_cache / f"{h.game_id}.torrent"
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_bytes(data)
+                    magnet, info_hash = make_magnet(data)
+                    g.torrent.magnet = magnet
+                    g.torrent.info_hash = info_hash
+                    game_mod.save(g)
+                except Exception as exc:
+                    log.warning("Could not cache update torrent for %s: %s", h.game_id, exc)
+
+            if tracker is not None:
+                snapshot = content.take_snapshot(game_path, g.files.keys())
+                tracker.set_state(
+                    h.game_id,
+                    "clean",
+                    snapshot=snapshot,
+                    summary={"changed": 0, "removed": 0, "added": 0},
+                    changed=[],
+                    removed=[],
+                    added=[],
+                    pending_update=None,
+                )
+        except Exception:
+            # Never leave the game stuck "updating" forever just because
+            # finalizing failed (e.g. a bad manifest, a permission error) –
+            # the download itself already reached 100 %, so there is nothing
+            # left to retry towards. "modified" lets the user re-publish or
+            # re-download instead of the game silently staying locked.
+            log.exception("Update finalize failed for %s at %s", h.game_id, game_path)
             if tracker is not None:
                 tracker.set_state(h.game_id, "modified", pending_update=None)
-            return
-
-        game_mod.apply_manifest(g, manifest, keep_local_meta=True)
-        g.origin.peer_id = h.peer_id
-        g.origin.peer_name = h.peer_name
-        g.size_bytes = sum(g.sizes.values()) if g.sizes else integrity.dir_size(game_path)
-        game_mod.save(g)
-
-        cached_torrent = self._resume_store.find_metadata(h.download_id, rec.info_hash)
-        if cached_torrent is not None:
-            try:
-                data = cached_torrent.read_bytes()
-                cache_path = self._cfg.torrent_cache / f"{h.game_id}.torrent"
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                cache_path.write_bytes(data)
-                magnet, info_hash = make_magnet(data)
-                g.torrent.magnet = magnet
-                g.torrent.info_hash = info_hash
-                game_mod.save(g)
-            except Exception as exc:
-                log.warning("Could not cache update torrent for %s: %s", h.game_id, exc)
-
-        if tracker is not None:
-            snapshot = content.take_snapshot(game_path, g.files.keys())
-            tracker.set_state(
-                h.game_id,
-                "clean",
-                snapshot=snapshot,
-                summary={"changed": 0, "removed": 0, "added": 0},
-                changed=[],
-                removed=[],
-                added=[],
-                pending_update=None,
-            )
+            return True
 
         log.info("Update finalized for %s: revision %s", h.game_name, g.content.revision)
         await broadcast(
@@ -1376,6 +1508,7 @@ class TransferManager:
                 self._cfg,
                 exclude_paths=self.incomplete_download_dest_paths(),
             )
+        return True
 
     def _fetch_and_save_cover(self, h: _Handle) -> None:
         """
@@ -1933,14 +2066,25 @@ class TransferManager:
         )
         return True
 
-    async def _finalize_download(self, h: _Handle, status: DownloadStatus) -> None:
+    async def _finalize_download(self, h: _Handle, status: DownloadStatus) -> bool:
+        """Returns True once the download is actually done and may be handed
+        to `_cleanup_finished`/promoted to seeding. False means a Phase 6
+        safety-net recheck is in progress – the caller must *not* clean up or
+        seed the torrent yet, or the recheck's own force_recheck() would be
+        pointless (the torrent would be removed from the session right after
+        we asked it to redo its hash check).
+        """
         if status.id in self._completed_ids:
-            return
+            return True
         self._completed_ids.add(status.id)
         rec = self._paused.get(h.download_id)
         if rec is not None and rec.kind == "update":
-            await self._finalize_update(h, rec)
-            return
+            finished = await self._finalize_update(h, rec)
+            if not finished:
+                # Verification asked for a recheck: let the download run to
+                # completion again and retry finalizing next time it's "done".
+                self._completed_ids.discard(status.id)
+            return finished
         self._register_downloaded_game(h)
         self._promote_metadata_to_cache(h)
         try:
@@ -1963,6 +2107,7 @@ class TransferManager:
                 self._cfg,
                 exclude_paths=self.incomplete_download_dest_paths(),
             )
+        return True
 
     def _promote_metadata_to_cache(self, h: _Handle) -> None:
         """Reuse the downloaded torrent for seeding instead of re-hashing it."""
@@ -2020,7 +2165,12 @@ class TransferManager:
         status = self._build_status(h)
 
         if status.status == "done":
-            await self._finalize_download(h, status)
+            finalized = await self._finalize_download(h, status)
+            if not finalized:
+                # Phase 6 safety-net recheck in progress: this download must
+                # stay in self._handles/self._paused and must not be seeded –
+                # it isn't actually done yet (see _finalize_download).
+                return False
             if self._cfg.seed_after_download:
                 self._promote_download_to_seed(h)
             return True

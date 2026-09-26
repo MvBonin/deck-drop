@@ -161,6 +161,84 @@ def retarget_root(lt: object, ti: object, folder_name: str) -> None:
         ti.rename_file(i, new_path)
 
 
+def build_have_pieces(
+    lt: object,
+    ti: object,
+    root: Path,
+    unchanged_rels: list[str] | set[str],
+    changed_rels: list[str] | set[str],
+) -> list[bool]:
+    """Phase 6 "have_pieces" fast path (docs/plans/game-updates.md).
+
+    Pieces of files in `unchanged_rels` are marked present without reading
+    them (trusted: same hash in old/new manifest *and* the local tracker did
+    not report them as changed/removed – callers must only pass files that
+    meet both conditions). Pieces of files in `changed_rels` are verified by
+    reading the local bytes and comparing their SHA1 against the piece hash
+    from `ti`, so unchanged pieces *within* a changed file (e.g. a save-like
+    append at the end) are still marked present. Pieces of any other file
+    (added, or not present locally) are left `False`. Never raises for a
+    single unreadable file – that file's pieces are just left `False`.
+    """
+    from deckdrop.core.content import pieces_for_file, safe_join
+
+    unchanged = set(unchanged_rels)
+    changed = set(changed_rels)
+    piece_length = ti.piece_length()
+    have = [False] * ti.num_pieces()
+
+    fs = ti.files()
+    for i in range(fs.num_files()):
+        if fs.file_flags(i) & lt.file_storage.flag_pad_file:
+            continue
+        path = fs.file_path(i).replace("\\", "/")
+        parts = path.split("/", 1)
+        rel = parts[1] if len(parts) > 1 else parts[0]
+        offset = fs.file_offset(i)
+        size = fs.file_size(i)
+        piece_range = pieces_for_file(offset, size, piece_length)
+        if not piece_range:
+            continue
+
+        if rel in unchanged:
+            for p in piece_range:
+                have[p] = True
+        elif rel in changed:
+            local_path = safe_join(root, rel)
+            if local_path is None or not local_path.is_file():
+                continue
+            try:
+                _verify_changed_file_pieces(ti, local_path, offset, size, piece_range, have)
+            except OSError as exc:
+                log.debug("have_pieces: could not read %s: %s", rel, exc)
+
+    return have
+
+
+def _verify_changed_file_pieces(
+    ti: object,
+    local_path: Path,
+    file_offset: int,
+    file_size: int,
+    piece_range: range,
+    have: list[bool],
+) -> None:
+    import hashlib
+
+    with open(local_path, "rb") as fh:
+        for p in piece_range:
+            piece_size = ti.piece_size(p)
+            piece_start = p * ti.piece_length()
+            file_pos = piece_start - file_offset
+            to_read = max(0, min(piece_size, file_size - file_pos))
+            fh.seek(max(file_pos, 0))
+            data = fh.read(to_read) if to_read > 0 else b""
+            if len(data) < piece_size:
+                data = data + b"\x00" * (piece_size - len(data))
+            if hashlib.sha1(data).digest() == ti.hash_for_piece(p):
+                have[p] = True
+
+
 def make_magnet(torrent_data: bytes) -> tuple[str, str]:
     """
     Parse torrent bytes and return (magnet_uri, info_hash_hex).

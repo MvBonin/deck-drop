@@ -685,7 +685,11 @@ async def update_game(game_id: str, req: UpdateRequest) -> DownloadOut:
         raise HTTPException(502, "Manifest oder Torrent-Datei vom Peer nicht abrufbar")
 
     try:
-        download_id = s.transfer.start_update(g, peers, torrent_bytes, manifest)
+        # start_update does blocking file I/O (local prep, Phase 6 piece
+        # hashing) – never run it directly on the event loop thread.
+        download_id = await asyncio.to_thread(
+            s.transfer.start_update, g, peers, torrent_bytes, manifest
+        )
     except Exception as exc:
         raise HTTPException(500, f"Update konnte nicht gestartet werden: {exc}") from exc
 

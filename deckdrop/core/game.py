@@ -378,8 +378,17 @@ def apply_manifest(g: GameInfo, m: dict[str, Any], *, keep_local_meta: bool) -> 
         )
         for h in m.get("history", [])
     ]
-    g.files = dict(m.get("files", {}))
-    g.sizes = dict(m.get("sizes", {}))
+    # Manifests come from peers and are not trusted: a relpath must resolve
+    # inside the game folder, or it's dropped here – the one funnel both a
+    # fresh download and an update go through – before it can ever reach a
+    # stat()/hash_file()/open() call elsewhere (docs/plans/game-updates.md
+    # "Stolperfallen": paths from peer manifests are untrusted).
+    from deckdrop.core.content import safe_join
+
+    raw_files = m.get("files", {}) or {}
+    raw_sizes = m.get("sizes", {}) or {}
+    g.files = {rel: h for rel, h in raw_files.items() if safe_join(g.path, rel) is not None}
+    g.sizes = {rel: s for rel, s in raw_sizes.items() if safe_join(g.path, rel) is not None}
 
     if not keep_local_meta:
         g.id = m.get("id", g.id)
