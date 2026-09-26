@@ -36,6 +36,10 @@ class PeerEntry:
     online: bool = True
 
 
+def _norm_name(name: object) -> str:
+    return " ".join(str(name or "").split()).casefold()
+
+
 def _peer_http_url(address: str, port: int, path: str) -> str:
     host = address
     if ":" in address and not address.startswith("["):
@@ -263,20 +267,52 @@ class PeerRegistry:
 
         Fixes the legacy bug where a download used to get a freshly minted ID
         instead of the host's – see docs/plans/game-updates.md "1.4".
+
+        Candidates: a local game from this peer (by peer id, or by peer name
+        if the peer id changed since) with the same name, whose own ID the
+        peer doesn't know. The size is only a tie-breaker, never a filter: an
+        update on the host changes the size, and requiring a matching size
+        made such a copy permanently "foreign" – no update offered, only a
+        fresh download (Dawnwalker Rev 1 on the Deck vs. Rev 2 on the PC).
         """
-        name = rg.get("name")
-        size = int(rg.get("size_bytes") or 0)
+        name = _norm_name(rg.get("name"))
+        if not name:
+            return None
+        entry = self._peers.get(peer_id)
+        peer_name = entry.name if entry is not None else ""
+
+        candidates = []
         for local in self._library.all():
-            if local.origin.peer_id != peer_id:
-                continue
-            if local.name != name:
-                continue
-            if abs(local.size_bytes - size) >= 1024 * 1024:
-                continue
             if local.id in remote_ids:
                 continue
-            return local
-        return None
+            if _norm_name(local.name) != name:
+                continue
+            from_peer = local.origin.peer_id == peer_id or (
+                bool(peer_name) and local.origin.peer_name == peer_name
+            )
+            if not from_peer:
+                continue
+            candidates.append(local)
+
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            return None
+
+        # Several same-named copies from this peer: only link an unambiguous one.
+        size = int(rg.get("size_bytes") or 0)
+        remote_hashes = {rg.get("content_hash")} | {
+            h.get("content_hash") for h in rg.get("history") or [] if isinstance(h, dict)
+        }
+        remote_hashes.discard(None)
+        remote_hashes.discard("")
+        strong = [
+            c
+            for c in candidates
+            if (c.content.content_hash and c.content.content_hash in remote_hashes)
+            or abs(c.size_bytes - size) < 1024 * 1024
+        ]
+        return strong[0] if len(strong) == 1 else None
 
     async def _sync_from_peer(
         self, peer_id: str, remote_games: list[dict], address: str, port: int
@@ -299,7 +335,16 @@ class PeerRegistry:
                     except RuntimeError:
                         cfg = None
                     if cfg is not None:
-                        relink_game_id(cfg, self._library, legacy, game_id)
+                        from deckdrop.core import debuglog
+
+                        old_id = legacy.id
+                        if relink_game_id(cfg, self._library, legacy, game_id):
+                            debuglog.record(
+                                "relink",
+                                "relinked",
+                                game_id,
+                                detail=f"{legacy.name}: {old_id} → {game_id}",
+                            )
                         local = self._library.get(game_id)
             if not local:
                 continue

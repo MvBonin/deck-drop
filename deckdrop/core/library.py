@@ -85,12 +85,31 @@ def relink_game_id(cfg: Config, library: Library, game: GameInfo, new_id: str) -
     if old_id == new_id:
         return False
 
+    # Stop a baseline hash of the old ID before changing anything: it holds
+    # its own GameInfo and would save the old ID back when it finishes.
+    tracker, transfer = _relink_services()
+    if tracker is not None:
+        try:
+            tracker.rename_game(old_id, new_id)
+        except Exception as exc:
+            log.warning("Could not move content state for %s: %s", game.name, exc)
+    if transfer is not None:
+        try:
+            transfer.drop_seed(old_id)
+        except Exception as exc:
+            log.debug("drop_seed(%s) failed during relink: %s", old_id, exc)
+
     game.id = new_id
     try:
         game_mod.save(game)
     except OSError as exc:
         log.warning("Could not save relinked game %s: %s", game.name, exc)
         game.id = old_id
+        if tracker is not None:
+            try:
+                tracker.rename_game(new_id, old_id)
+            except Exception as exc2:
+                log.warning("Could not restore content state for %s: %s", game.name, exc2)
         return False
 
     old_torrent = cfg.torrent_cache / f"{old_id}.torrent"
@@ -112,4 +131,25 @@ def relink_game_id(cfg: Config, library: Library, game: GameInfo, new_id: str) -
     library.remove(old_id)
     library.add(game)
     log.info("Relinked game %s: %s -> %s (legacy ID fix)", game.name, old_id, new_id)
+
+    if transfer is not None and new_torrent.is_file():
+        try:
+            transfer.seed_from_cache(new_id, game.path, new_torrent)
+        except Exception as exc:
+            log.debug("Could not re-seed %s after relink: %s", new_id, exc)
     return True
+
+
+def _relink_services() -> tuple[object | None, object | None]:
+    """ContentTracker and TransferManager if the app state is up (fail-open)."""
+    try:
+        from deckdrop.api import state as app_state
+
+        s = app_state.get()
+    except Exception:
+        return None, None
+    try:
+        tracker = s.get_content_tracker()
+    except Exception:
+        tracker = None
+    return tracker, getattr(s, "transfer", None)
