@@ -132,6 +132,31 @@ class ContentTracker:
     def get_entry(self, game_id: str) -> dict[str, Any]:
         return dict(self._entries.get(game_id, {}))
 
+    def stat_suspects(self, game_id: str) -> set[str]:
+        """Files that may differ from the manifest, by stat() alone – read-only.
+
+        Used before an update instead of `scan()`: no hashing (a file with a
+        new mtime is simply read by the update's piece check anyway) and no
+        state change (a failed update start must not leave the game
+        "modified").
+        """
+        g = self._library.get(game_id)
+        if not g or not g.files:
+            return set()
+        snapshot = dict(self._entries.get(game_id, {}).get("snapshot") or {})
+        result = content.compare_snapshot(g.path, g.files, snapshot, g.content.ignore)
+        suspects = {*result.changed, *result.mtime_only, *result.removed}
+        for rel, size in g.sizes.items():
+            if rel in suspects:
+                continue
+            path = content.safe_join(g.path, rel)
+            try:
+                if path is not None and path.stat().st_size != size:
+                    suspects.add(rel)
+            except OSError:
+                suspects.add(rel)
+        return suspects
+
     def change_lists(self, game_id: str) -> dict[str, list[str]]:
         e = self._entries.get(game_id, {})
         return {

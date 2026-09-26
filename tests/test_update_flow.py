@@ -270,9 +270,9 @@ def test_start_update_without_baseline_verifies_local_files(tmp_path, make_game,
     orig_fast = tm._apply_have_pieces_fast_path
     calls = []
 
-    def _spy(lt, ti, game_path, diff, tracker_, game_id, params, reason="x"):
+    def _spy(lt, ti, game_path, diff, tracker_, game_id, params, reason="x", **kwargs):
         calls.append((sorted(diff.changed), sorted(diff.added), reason))
-        return orig_fast(lt, ti, game_path, diff, tracker_, game_id, params, reason)
+        return orig_fast(lt, ti, game_path, diff, tracker_, game_id, params, reason, **kwargs)
 
     tm._apply_have_pieces_fast_path = _spy
     transfer_mod._lt = MagicMock(return_value=fake_lt)

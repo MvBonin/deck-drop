@@ -197,8 +197,8 @@ def test_update_uses_have_pieces_and_stays_byte_identical(tmp_path, monkeypatch)
         captured: dict = {}
         orig_build_have_pieces = torrent_mod.build_have_pieces
 
-        def _spy(lt_, ti_, root_, unchanged_rels, changed_rels):
-            result = orig_build_have_pieces(lt_, ti_, root_, unchanged_rels, changed_rels)
+        def _spy(lt_, ti_, root_, unchanged_rels, changed_rels, **kwargs):
+            result = orig_build_have_pieces(lt_, ti_, root_, unchanged_rels, changed_rels, **kwargs)
             captured["unchanged_rels"] = set(unchanged_rels)
             captured["changed_rels"] = set(changed_rels)
             captured["have"] = result

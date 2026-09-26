@@ -47,7 +47,11 @@ export function GameCard({
   // No file hashes yet and no hash running (interrupted, or cancelled for an
   // update) – not shared until the next check, but not "Verändert" either.
   const unverified = mode === 'own' && game.content_state === 'unverified';
-  const updatePct = Math.round((updateProgress ?? 0) * 100);
+  // updateProgress: { progress, phase, phase_progress } from download_progress.
+  const updatePreparing = updateProgress?.phase === 'preparing';
+  const updatePct = Math.round(
+    ((updatePreparing ? updateProgress?.phase_progress : updateProgress?.progress) ?? 0) * 100,
+  );
   const versionLabel = game.version_label || `Rev. ${game.revision ?? 1}`;
   const hostPreparing = mode === 'network'
     && !game.has_torrent
@@ -162,7 +166,9 @@ export function GameCard({
         `}
         ${updating && html`
           <div class="card-prep">
-            <div class="card-prep-label">Wird aktualisiert… ${updatePct}%</div>
+            <div class="card-prep-label">${updatePreparing
+              ? `Wird aktualisiert… prüfe vorhandene Dateien ${updatePct}%`
+              : `Wird aktualisiert… ${updatePct}%`}</div>
             <div class="progress-bar" role="progressbar" aria-valuenow=${updatePct} aria-valuemin="0" aria-valuemax="100">
               <div class="progress-fill" style="width:${updatePct}%"></div>
             </div>
