@@ -286,6 +286,10 @@ seed_after_download = true
 - [ ] Quick-Access-UI: aktive Downloads, Peer-Count
 - [ ] Download starten aus Quick Access Menu
 
+### Phase 7 – Spiel-Updates & Versionen
+- [ ] Siehe [docs/plans/game-updates.md](docs/plans/game-updates.md): Änderungserkennung,
+      Updates veröffentlichen (Version + Notiz), Delta-Updates per libtorrent, Versionswahl im Netzwerk
+
 ---
 
 ## Sicherheitsmodell
