@@ -404,6 +404,7 @@ class ContentTracker:
         if not g.content.content_hash:
             g.content.content_hash = content.compute_content_hash(files, sizes)
         game_mod.save(g)
+        self._library.add(g)
         entry = self._entries.get(g.id)
         if entry and entry.pop("pending_hash_reason", None) is not None:
             self._save_entry(g.id, entry)
@@ -542,11 +543,27 @@ class ContentTracker:
             name=f"content-publish-{game_id}",
         ).start()
 
+    def _fresh(self, game_id: str) -> game_mod.GameInfo | None:
+        """The game as it is on disk now, put back into the library (library
+        objects go stale – every GET /api/games reloads them from disk)."""
+        g = self._library.get(game_id)
+        if not g:
+            return None
+        try:
+            fresh = game_mod.load_from_path(g.path)
+        except Exception:
+            return g
+        if fresh is None or fresh.id != game_id:
+            return g
+        fresh.available = g.available
+        self._library.add(fresh)
+        return fresh
+
     def _publish_worker(
         self, game_id: str, version_label: str, note: str, exclude: list[str]
     ) -> None:
         try:
-            g = self._library.get(game_id)
+            g = self._fresh(game_id)
             if not g:
                 return
             self.set_state(game_id, "publishing")
@@ -653,6 +670,8 @@ class ContentTracker:
             g.sizes = sizes
             g.size_bytes = sum(sizes.values())
             game_mod.save(g)
+            # Scans and the torrent rebuild read the library, not the disk.
+            self._library.add(g)
 
             snapshot = content.take_snapshot(g.path, files.keys())
             self.set_state(
@@ -711,6 +730,7 @@ class ContentTracker:
                 entry.note = note
             break
         game_mod.save(g)
+        self._library.add(g)
         return True
 
     def _reseed(self, game_id: str, game_path: Path) -> None:
