@@ -12,6 +12,7 @@ import logging
 import re
 import secrets
 import shutil
+import threading
 import time
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -510,6 +511,9 @@ class TransferManager:
         if not handle:
             return
         try:
+            from deckdrop.core import debuglog
+
+            debuglog.record("recheck", "torrent_rebuilt", game_id)
             handle.force_recheck()
             log.debug("force_recheck on seed for %s", game_id)
         except Exception as exc:
@@ -667,7 +671,14 @@ class TransferManager:
         new_sizes: dict[str, int] = dict(manifest.get("sizes") or {})
         content_block = manifest.get("content") or {}
         new_ignore = list(content_block.get("ignore") or [])
-        diff = content.diff_manifests(game.files, game.sizes, new_files, new_sizes)
+        if game.files:
+            diff = content.diff_manifests(game.files, game.sizes, new_files, new_sizes)
+            reuse_reason = "update_reuse_local"
+        else:
+            # No old hashes (baseline never finished, e.g. cancelled for this
+            # update): verify whatever is already on disk piece by piece.
+            diff = content.diff_without_baseline(game_path, new_files, new_sizes)
+            reuse_reason = "update_without_baseline"
         plan = content.plan_local_prep(game_path, diff, new_sizes, new_ignore)
         content.apply_local_prep(game_path, plan)
 
@@ -731,7 +742,9 @@ class TransferManager:
             params = lt.add_torrent_params()
             params.ti = ti
             params.save_path = str(game_path.parent)
-            self._apply_have_pieces_fast_path(lt, ti, game_path, diff, tracker, game.id, params)
+            self._apply_have_pieces_fast_path(
+                lt, ti, game_path, diff, tracker, game.id, params, reuse_reason
+            )
             handle = self._session.add_torrent(params)
 
             handle.connect_peer((primary.address, self._cfg.torrent_port))
@@ -774,6 +787,7 @@ class TransferManager:
         tracker: object | None,
         game_id: str,
         params: object,
+        reason: str = "update_reuse_local",
     ) -> None:
         """Phase 6: mark pieces of already-correct files present so libtorrent
         skips re-checking/re-downloading them. Best effort – any problem here
@@ -802,6 +816,10 @@ class TransferManager:
                 *diff.moved.keys(),
             ]
 
+            if changed_rels:
+                from deckdrop.core import debuglog
+
+                debuglog.record("piece_check", reason, game_id, changed_rels)
             have_pieces = build_have_pieces(lt, ti, game_path, unchanged_rels, changed_rels)
             if len(have_pieces) == ti.num_pieces():
                 params.have_pieces = have_pieces
@@ -1293,20 +1311,25 @@ class TransferManager:
         except Exception as exc:
             log.warning("Content baseline failed for downloaded game %s: %s", game_id, exc)
 
-    def _register_downloaded_game(self, h: _Handle) -> None:
+    def _register_downloaded_game(self, h: _Handle) -> bool:
         """Write deckdrop.toml with origin peer so My Games shows the source.
 
         If a manifest was fetched for this download (Phase 4), it is applied
         so the receiver's `[content]`/`[[history]]`/`[files]`/`[sizes]` match
         the host's exactly, keeping the host's game id either way (see the
-        legacy-ID bug in docs/plans/game-updates.md "Kontext").
+        legacy-ID bug in docs/plans/game-updates.md "Kontext"). The manifest
+        is only trusted if it matches the torrent (`_manifest_mismatches`);
+        otherwise its file hashes are dropped and rebuilt locally.
+
+        Returns True if the game still needs a full local hash (no usable
+        manifest), so the caller can start it once the library knows the game.
         """
         from deckdrop.core import game as game_mod
         from deckdrop.core import integrity
 
         dest = h.dest_path
         if not dest.is_dir():
-            return
+            return False
 
         _peer, remote_game = self._remote_peer_game(h)
         steam_app_id: int | None = None
@@ -1318,6 +1341,12 @@ class TransferManager:
                 steam_app_id = None
 
         manifest = self._resume_store.load_manifest(h.download_id)
+        mismatches = self._manifest_mismatches(h, manifest) if manifest else None
+
+        def _drop_untrusted_hashes(g: object) -> None:
+            if mismatches:
+                g.files = {}  # type: ignore[attr-defined]
+                g.sizes = {}  # type: ignore[attr-defined]
 
         try:
             info = game_mod.load_from_path(dest)
@@ -1325,6 +1354,7 @@ class TransferManager:
                 changed = False
                 if manifest:
                     game_mod.apply_manifest(info, manifest, keep_local_meta=False)
+                    _drop_untrusted_hashes(info)
                     info.size_bytes = integrity.dir_size(dest)
                     changed = True
                 if not info.origin.peer_name:
@@ -1351,80 +1381,87 @@ class TransferManager:
                 )
                 if manifest:
                     game_mod.apply_manifest(info, manifest, keep_local_meta=False)
+                    _drop_untrusted_hashes(info)
                 info.id = h.game_id
                 info.origin.peer_id = h.peer_id
                 info.origin.peer_name = h.peer_name
                 info.size_bytes = integrity.dir_size(dest)
                 game_mod.save(info)
             log.info("Registered download at %s (from %s)", dest, h.peer_name)
+            if mismatches:
+                self._request_rehash(info.id, "manifest_mismatch")
             self._ensure_content_baseline(info.id)
+            return not info.files
         except Exception as exc:
             log.warning("Could not register downloaded game at %s: %s", dest, exc)
+            return False
 
-    async def _verify_update_or_recheck(
-        self, h: _Handle, game_path: Path, manifest: dict, pending: dict
-    ) -> bool:
-        """Phase 6 safety net: blake2b-verify changed/added files against the
-        manifest before trusting the fast path's `have_pieces` bitmap. This is
-        why a "changed" verdict from the last local scan excludes a file from
-        `unchanged` even if its manifest hash matches – an unchanged-looking
-        but locally corrupted file would otherwise be trusted here too, since
-        this only re-checks what the *manifest diff* calls changed/added.
-
-        A mismatch means a piece was wrongly marked present (or the file was
-        corrupted by something else mid-update); force a libtorrent recheck
-        and let the download run to completion again instead of finalizing
-        with bad data on disk (docs/plans/game-updates.md Phase 6).
-        """
-        from deckdrop.core import content, integrity
-
-        old = pending.get("old_manifest") or {}
-        new_files: dict[str, str] = manifest.get("files") or {}
-        new_sizes: dict[str, int] = manifest.get("sizes") or {}
-        diff = content.diff_manifests(
-            old.get("files") or {}, old.get("sizes") or {}, new_files, new_sizes
-        )
-        to_verify = [*diff.changed, *diff.added]
-        if not to_verify:
-            return True
-
-        def _check() -> list[str]:
-            bad = []
-            for rel in to_verify:
-                expected = new_files.get(rel)
-                local_path = content.safe_join(game_path, rel)
-                if expected is None or local_path is None or not local_path.is_file():
-                    bad.append(rel)
-                    continue
-                if integrity.hash_file(local_path) != expected:
-                    bad.append(rel)
-            return bad
-
-        mismatches = await asyncio.to_thread(_check)
-        if not mismatches:
-            return True
-
-        log.warning(
-            "Update verification failed for %d file(s) at %s, forcing recheck: %s",
-            len(mismatches),
-            game_path,
-            mismatches[:10],
-        )
+    def _request_rehash(self, game_id: str, reason: str) -> None:
+        """Fail-open: tell the ContentTracker why the next full hash happens."""
+        tracker = self._content_tracker()
+        if tracker is None:
+            return
         try:
-            h.handle.force_recheck()
+            tracker.request_rehash(game_id, reason)
         except Exception as exc:
-            log.warning("force_recheck failed for %s: %s", h.game_id, exc)
-        return False
+            log.debug("request_rehash failed for %s: %s", game_id, exc)
+
+    def _manifest_mismatches(self, h: _Handle, manifest: dict) -> list[str] | None:
+        """Compare the peer's manifest with the torrent libtorrent just verified
+        the data against – file list and sizes only, nothing is read from disk.
+
+        This replaces the old blake2b re-hash of every changed/added file:
+        files are piece-aligned (hybrid v1+v2 torrents), so every piece of
+        those files was already SHA1-checked, either locally by the Phase 6
+        fast path or by libtorrent while downloading. The only thing left to
+        vouch for is that the manifest (which becomes our local baseline)
+        describes this torrent. Returns None if no torrent metadata is
+        available (nothing to compare), else the mismatching relpaths.
+        """
+        from deckdrop.core import debuglog
+        from deckdrop.core.torrent import manifest_torrent_mismatches
+
+        try:
+            ti = h.handle.torrent_file()
+        except Exception as exc:
+            log.debug("No torrent metadata for manifest check of %s: %s", h.game_id, exc)
+            return None
+        if ti is None:
+            return None
+        files: dict[str, str] = manifest.get("files") or {}
+        if not files:
+            return None
+        sizes: dict[str, int] = manifest.get("sizes") or {}
+        ignore = list((manifest.get("content") or {}).get("ignore") or [])
+        try:
+            bad = manifest_torrent_mismatches(_lt(), ti, files, sizes, ignore)
+        except Exception as exc:
+            log.warning("Manifest check failed for %s: %s", h.game_id, exc)
+            return None
+        if bad:
+            log.warning(
+                "Manifest of %s does not match its torrent (%d file(s)): %s",
+                h.game_id,
+                len(bad),
+                bad[:10],
+            )
+            debuglog.record("manifest_check", "manifest_mismatch", h.game_id, bad)
+        else:
+            debuglog.record(
+                "manifest_check", "manifest_ok", h.game_id, detail=f"{len(files)} Dateien"
+            )
+        return bad
 
     async def _finalize_update(self, h: _Handle, rec: _PersistedRecord) -> bool:
         """Finish an in-place update: delete removed files, rewrite deckdrop.toml
         with the same game id, cache the new torrent, and resume seeding
         (docs/plans/game-updates.md "5.2.4").
 
-        Returns True once finalized. Returns False if the Phase 6 safety-net
-        verification found a mismatch and triggered `force_recheck()` instead
-        – the caller must let the download run to completion again and retry
-        `_finalize_update` afterwards rather than treating it as done.
+        Returns True once finalized. (False is still part of the contract for
+        "not done yet, retry after the download completes again", but no path
+        returns it any more: the old blake2b safety net that force-rechecked
+        on a mismatch was replaced by a manifest↔torrent comparison, see
+        `_manifest_mismatches`.)
         """
         from deckdrop.core import content, integrity
         from deckdrop.core import game as game_mod
@@ -1437,8 +1474,7 @@ class TransferManager:
         if tracker is not None:
             pending = tracker.get_entry(h.game_id).get("pending_update") or {}
 
-        if not await self._verify_update_or_recheck(h, game_path, manifest, pending):
-            return False
+        mismatches = self._manifest_mismatches(h, manifest) if manifest else None
 
         try:
             deletes_after = pending.get("deletes_after") or []
@@ -1454,6 +1490,11 @@ class TransferManager:
             game_mod.apply_manifest(g, manifest, keep_local_meta=True)
             g.origin.peer_id = h.peer_id
             g.origin.peer_name = h.peer_name
+            if mismatches:
+                # Data is fine (libtorrent verified it), but the manifest's
+                # hashes don't describe it: rebuild the baseline locally.
+                g.files = {}
+                g.sizes = {}
             g.size_bytes = sum(g.sizes.values()) if g.sizes else integrity.dir_size(game_path)
             game_mod.save(g)
 
@@ -1482,6 +1523,7 @@ class TransferManager:
                     removed=[],
                     added=[],
                     pending_update=None,
+                    pending_hash_reason="manifest_mismatch" if mismatches else None,
                 )
         except Exception:
             # Never leave the game stuck "updating" forever just because
@@ -1508,6 +1550,13 @@ class TransferManager:
                 self._cfg,
                 exclude_paths=self.incomplete_download_dest_paths(),
             )
+        if mismatches and tracker is not None:
+            threading.Thread(
+                target=tracker.ensure_baseline,
+                args=(h.game_id,),
+                daemon=True,
+                name=f"content-rehash-{h.game_id}",
+            ).start()
         return True
 
     def _fetch_and_save_cover(self, h: _Handle) -> None:
@@ -1987,6 +2036,9 @@ class TransferManager:
         if now - last_at >= _STALL_RECHECK_AFTER and did not in self._recheck_done:
             self._recheck_done.add(did)
             try:
+                from deckdrop.core import debuglog
+
+                debuglog.record("recheck", "stall", h.game_id, detail=f"download {did}")
                 h.handle.force_recheck()
                 log.info("force_recheck for stalled download %s", did)
             except Exception as exc:
@@ -2085,7 +2137,7 @@ class TransferManager:
                 # completion again and retry finalizing next time it's "done".
                 self._completed_ids.discard(status.id)
             return finished
-        self._register_downloaded_game(h)
+        needs_hash = self._register_downloaded_game(h)
         self._promote_metadata_to_cache(h)
         try:
             await asyncio.to_thread(self._fetch_and_save_cover, h)
@@ -2107,6 +2159,16 @@ class TransferManager:
                 self._cfg,
                 exclude_paths=self.incomplete_download_dest_paths(),
             )
+            if needs_hash:
+                # The baseline in _register_downloaded_game was a no-op (the
+                # game wasn't in the library yet); start the full hash now
+                # instead of waiting for the next periodic scan.
+                threading.Thread(
+                    target=self._ensure_content_baseline,
+                    args=(h.game_id,),
+                    daemon=True,
+                    name=f"content-baseline-{h.game_id}",
+                ).start()
         return True
 
     def _promote_metadata_to_cache(self, h: _Handle) -> None:

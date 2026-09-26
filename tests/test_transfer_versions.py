@@ -339,3 +339,80 @@ def test_register_downloaded_game_applies_manifest_and_baselines(transfer, tmp_p
     # apply_manifest(keep_local_meta=False) kept the host's created_by/updated_by.
     assert info.content.created_by == "alice"
     tracker.ensure_baseline.assert_called_once_with("hostgame1")
+
+
+def _handle_listing(root: str, sizes: dict[str, int]) -> MagicMock:
+    """libtorrent handle mock whose torrent_file() lists exactly `sizes`."""
+    items = [(f"{root}/{rel}", size) for rel, size in sorted(sizes.items())]
+    fs = SimpleNamespace(
+        num_files=lambda: len(items),
+        file_path=lambda i: items[i][0],
+        file_size=lambda i: items[i][1],
+        file_flags=lambda i: 0,
+    )
+    ti = MagicMock()
+    ti.files.return_value = fs
+    handle = MagicMock()
+    handle.torrent_file.return_value = ti
+    return handle
+
+
+@pytest.mark.parametrize(
+    ("torrent_sizes", "expect_files", "expect_rehash"),
+    [
+        ({"game.bin": 42}, {"game.bin": "somehash"}, False),
+        ({"game.bin": 41}, {}, True),  # size differs → manifest not trusted
+    ],
+)
+def test_register_downloaded_game_checks_manifest_against_torrent(
+    transfer, tmp_path, monkeypatch, torrent_sizes, expect_files, expect_rehash
+):
+    from deckdrop.api import state as app_state
+    from deckdrop.core import debuglog
+    from deckdrop.core import game as game_mod
+
+    dest = tmp_path / "games" / "Dawnwalker"
+    dest.mkdir(parents=True)
+    (dest / "game.bin").write_bytes(b"x" * 42)
+    manifest = {
+        "id": "hostgame1",
+        "name": "Dawnwalker",
+        "content": {"revision": 2, "content_hash": "c0ffee", "ignore": []},
+        "history": [],
+        "files": {"game.bin": "somehash"},
+        "sizes": {"game.bin": 42},
+    }
+    h = _Handle(
+        download_id="d1",
+        game_id="hostgame1",
+        game_name="Dawnwalker",
+        peer_id="peer1",
+        peer_name="PC1",
+        handle=_handle_listing("Dawnwalker", torrent_sizes),
+        dest_path=dest,
+    )
+    transfer._resume_store.save_manifest(h.download_id, manifest)
+    tracker = MagicMock()
+    registry = MagicMock()
+    registry.get.return_value = SimpleNamespace(address="192.168.1.5", port=7373, games=[])
+    state = SimpleNamespace(peer_registry=registry, get_content_tracker=lambda: tracker)
+    monkeypatch.setattr(app_state, "get", lambda: state)
+    monkeypatch.setattr(
+        transfer_mod,
+        "_lt",
+        lambda: SimpleNamespace(file_storage=SimpleNamespace(flag_pad_file=1)),
+    )
+    debuglog.clear()
+
+    needs_hash = transfer._register_downloaded_game(h)
+
+    info = game_mod.load_from_path(dest)
+    assert info.files == expect_files
+    assert info.content.revision == 2  # rest of the manifest is still applied
+    assert needs_hash is expect_rehash
+    if expect_rehash:
+        tracker.request_rehash.assert_called_once_with("hostgame1", "manifest_mismatch")
+        assert debuglog.events("hostgame1")[0]["reason"] == "manifest_mismatch"
+    else:
+        tracker.request_rehash.assert_not_called()
+        assert debuglog.events("hostgame1")[0]["reason"] == "manifest_ok"

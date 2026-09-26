@@ -215,6 +215,55 @@ def build_have_pieces(
     return have
 
 
+def torrent_file_sizes(lt: object, ti: object) -> dict[str, int]:
+    """rel (without the torrent's root folder) -> size for every non-pad file."""
+    out: dict[str, int] = {}
+    fs = ti.files()
+    for i in range(fs.num_files()):
+        if fs.file_flags(i) & lt.file_storage.flag_pad_file:
+            continue
+        path = fs.file_path(i).replace("\\", "/")
+        parts = path.split("/", 1)
+        rel = parts[1] if len(parts) > 1 else parts[0]
+        out[rel] = fs.file_size(i)
+    return out
+
+
+def manifest_torrent_mismatches(
+    lt: object,
+    ti: object,
+    files: dict[str, str],
+    sizes: dict[str, int],
+    ignore: list[str] | tuple[str, ...] = (),
+) -> list[str]:
+    """Relpaths where a peer's manifest and its torrent disagree – no disk reads.
+
+    libtorrent already verified every piece against the torrent, so the data
+    on disk *is* the torrent's content. What it cannot vouch for is the
+    manifest (blake2b per file) we adopt as the local baseline. Same file set
+    and same sizes on both sides means the manifest describes this torrent;
+    anything else is reported: files only in the manifest, files only in the
+    torrent, and size differences (only where the manifest has a size).
+    Torrent-only files matching the ignore patterns are fine: older torrents
+    were built from the whole folder, the manifest never lists ignored files.
+    """
+    from deckdrop.core.content import is_ignored
+
+    in_torrent = torrent_file_sizes(lt, ti)
+    bad: set[str] = set()
+    for rel in files:
+        if rel not in in_torrent:
+            bad.add(rel)
+            continue
+        expected = sizes.get(rel)
+        if expected is not None and int(expected) != in_torrent[rel]:
+            bad.add(rel)
+    for rel in in_torrent:
+        if rel not in files and not is_ignored(rel, ignore):
+            bad.add(rel)
+    return sorted(bad)
+
+
 def _verify_changed_file_pieces(
     ti: object,
     local_path: Path,

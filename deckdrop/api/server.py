@@ -15,7 +15,16 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from deckdrop.api.routes import downloads, games, peers, service, settings, shutdown, status
+from deckdrop.api.routes import (
+    debug,
+    downloads,
+    games,
+    peers,
+    service,
+    settings,
+    shutdown,
+    status,
+)
 from deckdrop.api.websocket import router as ws_router
 
 
@@ -77,6 +86,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(service.router, prefix="/api")
     app.include_router(status.router, prefix="/api")
     app.include_router(shutdown.router, prefix="/api")
+    app.include_router(debug.router, prefix="/api")
     app.include_router(ws_router)
 
     frontend_dir = _find_frontend()

@@ -164,10 +164,11 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
         loop = asyncio.get_running_loop()
         peer_registry.bind_loop(loop)
-        from deckdrop.core import torrent_prep
+        from deckdrop.core import debuglog, torrent_prep
 
         torrent_prep.bind_loop(loop)
         content_tracker.bind_loop(loop)
+        debuglog.bind_loop(loop)
         # Startup
         try:
             await discovery.start(cfg, peer_registry.upsert_sync, peer_registry.remove)

@@ -237,6 +237,14 @@ def _prepare(game_id: str, force: bool = False) -> None:
             return
 
         log.info("Preparing torrent for %s (%s)", g.name, game_id)
+        from deckdrop.core import debuglog
+
+        debuglog.record(
+            "torrent_build",
+            "torrent_forced" if force else "torrent_missing",
+            game_id,
+            sorted(g.files),
+        )
         _set_progress(game_id, 0.05)
 
         torrent_bytes = create_torrent_data(

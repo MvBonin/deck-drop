@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -63,6 +64,37 @@ class _FakeLt:
 
     def add_torrent_params(self):
         return MagicMock()
+
+
+class _SizedFileStorage:
+    """file_storage fake with sizes/flags, for the manifest↔torrent check."""
+
+    def __init__(self, root: str, sizes: dict[str, int]):
+        self._items = [(f"{root}/{rel}", size) for rel, size in sorted(sizes.items())]
+
+    def num_files(self) -> int:
+        return len(self._items)
+
+    def file_path(self, i: int) -> str:
+        return self._items[i][0]
+
+    def file_size(self, i: int) -> int:
+        return self._items[i][1]
+
+    def file_flags(self, i: int) -> int:
+        return 0
+
+
+def _handle_with_torrent(root: str, sizes: dict[str, int]) -> MagicMock:
+    """A libtorrent handle mock whose torrent_file() lists exactly `sizes`."""
+    ti = MagicMock()
+    ti.files.return_value = _SizedFileStorage(root, sizes)
+    handle = MagicMock()
+    handle.torrent_file.return_value = ti
+    return handle
+
+
+_CHECK_LT = SimpleNamespace(file_storage=SimpleNamespace(flag_pad_file=1))
 
 
 @pytest.fixture
@@ -209,6 +241,54 @@ def test_start_update_preps_files_sets_updating_and_hides_from_incomplete(
     assert info.path.resolve() not in tm.incomplete_download_dest_paths()
 
 
+def test_start_update_without_baseline_verifies_local_files(tmp_path, make_game, tm_factory):
+    """No old hashes (baseline cancelled for this update): a plain manifest
+    diff would call every file "added" and re-download the whole game.
+    Instead every file already on disk is treated as "changed" – its pieces
+    get verified by reading them, and a too-long file is truncated – while
+    nothing is deleted (no old file list to know what's obsolete).
+    """
+    from deckdrop.core import debuglog
+
+    cfg, tm = tm_factory()
+    info = _setup_game(tmp_path, make_game)
+    info.files = {}
+    info.sizes = {}
+    game_mod.save(info)
+    manifest = _manifest_for(info)
+
+    library = Library()
+    library.add(info)
+    tracker = ContentTracker(cfg, library)
+    app_state.init(cfg, library, transfer=tm, content=tracker)
+    debuglog.clear()
+
+    fake_lt = _FakeLt(_FakeTorrentInfo([f"{info.path.name}/x"]))
+    import deckdrop.network.transfer as transfer_mod
+
+    orig_lt = transfer_mod._lt
+    orig_fast = tm._apply_have_pieces_fast_path
+    calls = []
+
+    def _spy(lt, ti, game_path, diff, tracker_, game_id, params, reason="x"):
+        calls.append((sorted(diff.changed), sorted(diff.added), reason))
+        return orig_fast(lt, ti, game_path, diff, tracker_, game_id, params, reason)
+
+    tm._apply_have_pieces_fast_path = _spy
+    transfer_mod._lt = MagicMock(return_value=fake_lt)
+    try:
+        tm.start_update(info, [_Peer("peer1", "Bob", "192.168.1.5")], b"t", manifest)
+    finally:
+        transfer_mod._lt = orig_lt
+
+    assert calls == [(["bin.exe"], ["assets/data2.pak"], "update_without_baseline")]
+    assert tracker.state(info.id) == "updating"
+    assert debuglog.events(info.id)[0]["reason"] == "update_without_baseline"
+    assert (info.path / "bin.exe").stat().st_size == 60  # truncated to the new size
+    assert (info.path / "old_readme.txt").exists()  # never deleted without old list
+    assert tracker.get_entry(info.id)["pending_update"]["deletes_after"] == []
+
+
 def test_start_update_reverts_to_modified_on_unusable_torrent(tmp_path, make_game, tm_factory):
     """If the torrent bytes can't be parsed, start_update must not leave the
     game stuck "updating" forever with no download that could ever finalize
@@ -280,16 +360,16 @@ async def test_finalize_update_deletes_removed_keeps_id_and_local_files(
     rec = tm._paused[download_id]
     tm._library = library
 
-    # This test never runs a real libtorrent transfer, so the on-disk bytes
-    # don't actually match manifest["files"]'s hashes for the (mock-)changed
-    # files. Stub the Phase 6 safety-net hash so it trusts them, matching what
-    # a real completed download would have on disk; the safety net itself is
-    # covered by test_finalize_update_force_rechecks_on_hash_mismatch below.
-    monkeypatch.setattr(
-        integrity_mod,
-        "hash_file",
-        lambda p: manifest["files"].get(p.relative_to(info.path).as_posix(), "unused"),
-    )
+    # The torrent libtorrent verified the data against lists exactly the
+    # manifest's files and sizes, so the manifest is adopted without any
+    # re-hash of the downloaded files.
+    h.handle = _handle_with_torrent(info.path.name, manifest["sizes"])
+    monkeypatch.setattr(transfer_mod, "_lt", lambda: _CHECK_LT)
+
+    def _no_hash(*_a, **_k):
+        raise AssertionError("finalize must not re-hash downloaded files")
+
+    monkeypatch.setattr(integrity_mod, "hash_file", _no_hash)
 
     finished = await tm._finalize_update(h, rec)
     assert finished is True
@@ -314,14 +394,17 @@ async def test_finalize_update_deletes_removed_keeps_id_and_local_files(
 
 
 @pytest.mark.asyncio
-async def test_finalize_update_force_rechecks_on_hash_mismatch(
+async def test_finalize_update_manifest_mismatch_finalizes_and_requests_rehash(
     tmp_path, make_game, tm_factory, monkeypatch
 ):
-    """Phase 6 safety net: if a changed/added file doesn't actually match the
-    manifest hash after the download claims to be done (e.g. a wrongly-trusted
-    `have_pieces` bit), finalize must not accept it – it forces a libtorrent
-    recheck and reports itself unfinished so the caller retries later.
+    """If the peer's manifest doesn't describe the torrent (here: a size
+    differs), the data is still fine – libtorrent verified every piece – so
+    the update finalizes without a pointless force_recheck. The manifest's
+    file hashes are dropped instead and rebuilt locally, with the reason
+    recorded for the debug view.
     """
+    from deckdrop.core import debuglog
+
     cfg, tm = tm_factory()
     info = _setup_game(tmp_path, make_game)
     manifest = _manifest_for(info)
@@ -349,23 +432,26 @@ async def test_finalize_update_force_rechecks_on_hash_mismatch(
     h = tm._handles[download_id]
     rec = tm._paused[download_id]
     tm._library = library
+    h.handle = _handle_with_torrent(info.path.name, {"bin.exe": 61, "assets/data2.pak": 50})
+    monkeypatch.setattr(transfer_mod, "_lt", lambda: _CHECK_LT)
+    # Keep the background rehash from actually running in this test.
+    monkeypatch.setattr(tracker, "ensure_baseline", MagicMock())
+    debuglog.clear()
 
-    # bin.exe on disk (still the old 100 x'x' bytes, "prep" only truncated it
-    # to 60 bytes) does NOT hash to manifest["files"]["bin.exe"] – simulate a
-    # `have_pieces` bit wrongly marking it present. hash_file is left as the
-    # real implementation on purpose: it genuinely won't match "h_bin_new".
     finished = await tm._finalize_update(h, rec)
 
-    assert finished is False
-    h.handle.force_recheck.assert_called_once()
-
-    # Nothing was finalized: id/content untouched, still "updating".
+    assert finished is True
+    h.handle.force_recheck.assert_not_called()
     reloaded = game_mod.load_from_path(info.path)
-    assert reloaded.content.revision == 1
-    assert tracker.state(info.id) == "updating"
-    assert tracker.get_entry(info.id).get("pending_update") is not None
-    # The removed file must not have been deleted before a successful verify.
-    assert (info.path / "old_readme.txt").exists()
+    assert reloaded.content.revision == 2
+    assert reloaded.files == {}
+    assert not (info.path / "old_readme.txt").exists()
+    entry = tracker.get_entry(info.id)
+    assert entry.get("pending_update") is None
+    assert entry.get("pending_hash_reason") == "manifest_mismatch"
+    events = debuglog.events(info.id)
+    assert events[0]["reason"] == "manifest_mismatch"
+    assert events[0]["files"] == ["bin.exe"]
 
 
 @pytest.mark.asyncio

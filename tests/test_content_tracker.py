@@ -169,7 +169,9 @@ def test_baseline_hash_reports_progress(isolated_config, tmp_path, make_game, mo
     assert tracker.hash_progress(info.id) is None
 
 
-def test_ensure_baseline_leaves_patched_game_modified(isolated_config, tmp_path, game_with_files, monkeypatch):
+def test_ensure_baseline_leaves_patched_game_modified(
+    isolated_config, tmp_path, game_with_files, monkeypatch
+):
     info = game_with_files
     library = Library()
     library.add(info)
@@ -229,3 +231,127 @@ def test_game_out_shows_progress_while_hashing(isolated_config, tmp_path, game_w
     assert out.content_state == "hashing"
     assert out.torrent_preparing is True
     assert out.torrent_prep_progress == 0.4
+
+
+# -- hash reasons + cancelling a baseline hash (debug mode / update while hashing) --
+
+
+def test_hash_full_records_reason_and_clears_pending(isolated_config, tmp_path, game_with_files):
+    from deckdrop.core import debuglog
+
+    info = game_with_files
+    library = Library()
+    library.add(info)
+    tracker = _tracker(isolated_config, library)
+    debuglog.clear()
+
+    tracker.request_rehash(info.id, "manifest_mismatch")
+    tracker.ensure_baseline(info.id)
+
+    (ev,) = debuglog.events(info.id)
+    assert ev["kind"] == "blake2b"
+    assert ev["reason"] == "manifest_mismatch"
+    assert ev["files"] == ["bin.exe", "data.pak"]
+    assert "pending_hash_reason" not in tracker.get_entry(info.id)
+    # Persisted: a fresh tracker sees the cleared entry too.
+    assert "pending_hash_reason" not in _tracker(isolated_config, library).get_entry(info.id)
+
+
+def test_hash_full_default_reason_local_vs_downloaded(isolated_config, tmp_path, make_game):
+    from deckdrop.core import debuglog
+
+    local = make_game(tmp_path, "Local Game")
+    (local.path / "a.bin").write_bytes(b"a")
+    downloaded = make_game(tmp_path, "From Peer")
+    (downloaded.path / "b.bin").write_bytes(b"b")
+    downloaded.origin.peer_id = "peer1"
+    downloaded.origin.peer_name = "PC"
+    game_mod.save(downloaded)
+
+    library = Library()
+    library.add(local)
+    library.add(downloaded)
+    tracker = _tracker(isolated_config, library)
+    debuglog.clear()
+    tracker.ensure_baseline(local.id)
+    tracker.ensure_baseline(downloaded.id)
+
+    assert debuglog.events(local.id)[0]["reason"] == "new_local_game"
+    assert debuglog.events(downloaded.id)[0]["reason"] == "download_without_manifest"
+
+
+def test_scan_records_mtime_only_rehash(isolated_config, tmp_path, game_with_files):
+    from deckdrop.core import debuglog
+
+    info = game_with_files
+    library = Library()
+    library.add(info)
+    tracker = _tracker(isolated_config, library)
+    tracker.ensure_baseline(info.id)
+    debuglog.clear()
+
+    st = (info.path / "data.pak").stat()
+    os.utime(info.path / "data.pak", ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    assert tracker.scan(info.id) == "clean"
+
+    (ev,) = debuglog.events(info.id)
+    assert ev["reason"] == "mtime_changed"
+    assert ev["files"] == ["data.pak"]
+
+
+def test_cancel_hash_stops_baseline_without_writing(
+    isolated_config, tmp_path, game_with_files, monkeypatch
+):
+    import threading
+
+    from deckdrop.core import integrity
+
+    info = game_with_files
+    library = Library()
+    library.add(info)
+    tracker = _tracker(isolated_config, library)
+
+    started = threading.Event()
+    real_hash = integrity.hash_file
+
+    def slow_hash(path, progress=None):
+        started.set()
+        # Keep "reading" until the cancel request is seen via the callback.
+        for _ in range(500):
+            progress(1)
+            time.sleep(0.01)
+        return real_hash(path)
+
+    monkeypatch.setattr("deckdrop.core.content_tracker.integrity.hash_file", slow_hash)
+    t = threading.Thread(target=tracker.ensure_baseline, args=(info.id,))
+    t.start()
+    assert started.wait(5)
+    assert tracker.state(info.id) == "hashing"
+
+    assert tracker.cancel_hash(info.id, timeout=5) is True
+    t.join(5)
+    assert not t.is_alive()
+
+    reloaded = game_mod.load_from_path(info.path)
+    assert reloaded.files == {}
+    assert tracker.state(info.id) == "modified"
+    assert tracker.get_entry(info.id)["pending_hash_reason"] == "update_started"
+
+    # While held (update being set up), no new baseline hash starts.
+    monkeypatch.setattr("deckdrop.core.content_tracker.integrity.hash_file", real_hash)
+    tracker.ensure_baseline(info.id)
+    assert game_mod.load_from_path(info.path).files == {}
+
+    # Released (update failed): the next baseline catches up, with the reason.
+    tracker.release_hash_hold(info.id)
+    tracker.ensure_baseline(info.id)
+    assert set(game_mod.load_from_path(info.path).files) == {"bin.exe", "data.pak"}
+    assert tracker.state(info.id) == "clean"
+
+
+def test_cancel_hash_without_running_hash_is_noop(isolated_config, tmp_path, game_with_files):
+    library = Library()
+    library.add(game_with_files)
+    tracker = _tracker(isolated_config, library)
+    assert tracker.cancel_hash(game_with_files.id) is True
+    tracker.release_hash_hold(game_with_files.id)

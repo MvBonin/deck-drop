@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from deckdrop.core import content, integrity
+from deckdrop.core import content, debuglog, integrity
 from deckdrop.core import game as game_mod
 
 log = logging.getLogger(__name__)
@@ -33,6 +33,10 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+class _HashCancelled(Exception):
+    """Raised inside `_hash_full` when `cancel_hash()` asked it to stop."""
+
+
 class ContentTracker:
     def __init__(self, cfg: object, library: object) -> None:
         self._cfg = cfg
@@ -43,6 +47,11 @@ class ContentTracker:
         self._publishing: set[str] = set()
         self._periodic_task: asyncio.Task | None = None
         self._entries: dict[str, dict[str, Any]] = {}
+        # game_id -> (cancel requested, hashing finished) for a running _hash_full
+        self._hash_runs: dict[str, tuple[threading.Event, threading.Event]] = {}
+        # games whose baseline hash must not (re)start, e.g. while an update
+        # is being set up after cancel_hash()
+        self._hash_hold: set[str] = set()
         self._load_all()
 
     # -- lifecycle --
@@ -76,9 +85,22 @@ class ContentTracker:
             return
         for p in d.glob("*.json"):
             try:
-                self._entries[p.stem] = json.loads(p.read_text(encoding="utf-8"))
+                entry = json.loads(p.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
+            state = entry.get("state")
+            if state in ("hashing", "publishing"):
+                # Nothing can still be hashing/publishing right after startup –
+                # the app was stopped mid-way (e.g. the Steam Deck went to
+                # sleep). Left as is, ensure_baseline/scan would skip this game
+                # as "busy" forever. "updating" is different: that one is
+                # resumed by the TransferManager and must survive restarts.
+                entry["state"] = "modified"
+                entry.pop("hash_progress", None)
+                if state == "hashing":
+                    entry["pending_hash_reason"] = "interrupted"
+                self._save_entry(p.stem, entry)
+            self._entries[p.stem] = entry
 
     def _save_entry(self, game_id: str, entry: dict[str, Any]) -> None:
         path = self._state_path(game_id)
@@ -129,6 +151,40 @@ class ContentTracker:
             {"game_id": game_id, "state": state, "summary": entry.get("summary", _EMPTY_SUMMARY)},
         )
 
+    def request_rehash(self, game_id: str, reason: str) -> None:
+        """Remember why the next full baseline hash for `game_id` happens.
+
+        Persisted in the tracker entry, so it survives until the hash actually
+        runs (e.g. a fresh download that is not in the library yet).
+        """
+        entry = dict(self._entries.get(game_id, {}))
+        entry["pending_hash_reason"] = reason
+        self._entries[game_id] = entry
+        self._save_entry(game_id, entry)
+
+    def cancel_hash(self, game_id: str, timeout: float = 30.0) -> bool:
+        """Stop a running baseline hash for `game_id` (e.g. an update was started).
+
+        Returns True once no hash is running any more. The cancelled hash does
+        not write anything to the game; the entry becomes "modified" with
+        `pending_hash_reason="update_started"`, so a later scan redoes it if
+        the update never finishes. Also holds off any *new* baseline hash of
+        this game (a scan pass could otherwise restart it before the update
+        marks the game "updating") until `release_hash_hold()`.
+        """
+        with self._lock:
+            self._hash_hold.add(game_id)
+            run = self._hash_runs.get(game_id)
+        if run is None:
+            return True
+        cancel, done = run
+        cancel.set()
+        return done.wait(timeout)
+
+    def release_hash_hold(self, game_id: str) -> None:
+        with self._lock:
+            self._hash_hold.discard(game_id)
+
     def hash_progress(self, game_id: str) -> float | None:
         """Fraction of files hashed while state is hashing or publishing."""
         if self.state(game_id) not in ("hashing", "publishing"):
@@ -157,13 +213,27 @@ class ContentTracker:
             return
 
         if not g.files:
-            self.set_state(game_id, "hashing", hash_progress=0.0)
+            cancel, done = threading.Event(), threading.Event()
+            with self._lock:
+                if game_id in self._hash_hold:
+                    return
+                self._hash_runs[game_id] = (cancel, done)
             try:
-                self._hash_full(g)
-            except Exception as exc:
-                log.error("Baseline hashing failed for %s: %s", game_id, exc)
-                self.set_state(game_id, "modified")
-                return
+                self.set_state(game_id, "hashing", hash_progress=0.0)
+                try:
+                    self._hash_full(g, cancel)
+                except _HashCancelled:
+                    log.info("Baseline hashing for %s cancelled", game_id)
+                    self.set_state(game_id, "modified", pending_hash_reason="update_started")
+                    return
+                except Exception as exc:
+                    log.error("Baseline hashing failed for %s: %s", game_id, exc)
+                    self.set_state(game_id, "modified")
+                    return
+            finally:
+                with self._lock:
+                    self._hash_runs.pop(game_id, None)
+                done.set()
             snapshot = content.take_snapshot(g.path, g.files.keys())
             self.set_state(
                 game_id,
@@ -229,14 +299,29 @@ class ContentTracker:
             added=[],
         )
 
-    def _hash_full(self, g: game_mod.GameInfo) -> None:
+    def _hash_reason(self, g: game_mod.GameInfo) -> str:
+        pending = self._entries.get(g.id, {}).get("pending_hash_reason")
+        if pending:
+            return str(pending)
+        if g.origin.peer_id or g.origin.peer_name:
+            return "download_without_manifest"
+        return "new_local_game"
+
+    def _hash_full(self, g: game_mod.GameInfo, cancel: threading.Event | None = None) -> None:
         rels = content.iter_content_files(g.path, g.content.ignore)
+        debuglog.record("blake2b", self._hash_reason(g), g.id, rels)
+
+        def _check_cancel(_n: int) -> None:
+            if cancel is not None and cancel.is_set():
+                raise _HashCancelled()
+
         files: dict[str, str] = {}
         sizes: dict[str, int] = {}
         total = 0
         n = len(rels) or 1
         done = 0
         for rel in rels:
+            _check_cancel(0)
             path = g.path / rel
             try:
                 st = path.stat()
@@ -244,7 +329,7 @@ class ContentTracker:
                 done += 1
                 self._note_hash_progress(g.id, done / n)
                 continue
-            files[rel] = integrity.hash_file(path)
+            files[rel] = integrity.hash_file(path, _check_cancel)
             sizes[rel] = st.st_size
             total += st.st_size
             done += 1
@@ -255,6 +340,9 @@ class ContentTracker:
         if not g.content.content_hash:
             g.content.content_hash = content.compute_content_hash(files, sizes)
         game_mod.save(g)
+        entry = self._entries.get(g.id)
+        if entry and entry.pop("pending_hash_reason", None) is not None:
+            self._save_entry(g.id, entry)
 
     def _note_hash_progress(self, game_id: str, progress: float) -> None:
         entry = dict(self._entries.get(game_id, {}))
@@ -289,6 +377,8 @@ class ContentTracker:
         result = content.compare_snapshot(g.path, g.files, snapshot, g.content.ignore)
 
         changed = list(result.changed)
+        if result.mtime_only:
+            debuglog.record("blake2b", "mtime_changed", game_id, result.mtime_only)
         for rel in result.mtime_only:
             path = g.path / rel
             try:
@@ -406,6 +496,7 @@ class ContentTracker:
 
             files: dict[str, str] = {}
             sizes: dict[str, int] = {}
+            rehashed: list[str] = []
             total = len(rels) or 1
             for i, rel in enumerate(rels):
                 path = g.path / rel
@@ -430,10 +521,18 @@ class ContentTracker:
                     h = old_hash
                 else:
                     h = integrity.hash_file(path)
+                    rehashed.append(rel)
                 files[rel] = h
                 sizes[rel] = st.st_size
                 self._note_hash_progress(game_id, (i + 1) / total)
 
+            debuglog.record(
+                "blake2b",
+                "publish",
+                game_id,
+                rehashed,
+                detail=f"{len(files) - len(rehashed)} Datei(en) ohne Rehash übernommen",
+            )
             new_hash = content.compute_content_hash(files, sizes)
             if new_hash and new_hash == g.content.content_hash and ignore == g.content.ignore:
                 # Same files: still keep a version name the user typed (e.g. 1.0.5

@@ -200,6 +200,29 @@ def diff_manifests(
     return diff
 
 
+def diff_without_baseline(
+    root: Path, new_files: dict[str, str], new_sizes: dict[str, int]
+) -> ManifestDiff:
+    """Diff for an update when the local game has no hashes yet (its baseline
+    hash never finished, e.g. it was cancelled so the update could start).
+
+    Nothing can be trusted unread, so every new file that already exists
+    locally counts as "changed": its pieces are verified by reading them
+    (Phase 6 fast path) and a too-long file gets truncated by local prep.
+    Files not on disk are "added". Nothing is "removed" – without the old
+    file list, leftovers can't be told apart from local files.
+    """
+    diff = ManifestDiff()
+    for rel in sorted(new_files):
+        path = safe_join(root, rel)
+        if path is not None and path.is_file():
+            diff.changed.append(rel)
+        else:
+            diff.added.append(rel)
+    diff.download_estimate = None
+    return diff
+
+
 @dataclass
 class LocalPrepPlan:
     moves: list[tuple[str, str]] = field(default_factory=list)  # (old_rel, new_rel)

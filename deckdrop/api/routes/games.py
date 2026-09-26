@@ -629,10 +629,16 @@ async def get_updates(game_id: str) -> dict:
                     if manifest is not None:
                         break
                 if manifest is not None:
-                    diff = content.diff_manifests(
-                        g.files, g.sizes, manifest.get("files") or {}, manifest.get("sizes") or {}
-                    )
-                    download_estimate = diff.download_estimate
+                    if g.files:
+                        diff = content.diff_manifests(
+                            g.files,
+                            g.sizes,
+                            manifest.get("files") or {},
+                            manifest.get("sizes") or {},
+                        )
+                        download_estimate = diff.download_estimate
+                    # else: no local hashes yet (baseline still running or
+                    # never done) – unknown how much is reusable, so no estimate.
                     history = list(manifest.get("history") or [])[-_UPDATES_HISTORY_LIMIT:]
             out_versions.append(
                 {
@@ -677,12 +683,35 @@ async def update_game(game_id: str, req: UpdateRequest) -> DownloadOut:
         raise HTTPException(404, "Spiel nicht gefunden")
 
     tracker = s.get_content_tracker()
+    try:
+        return await _update_game(s, g, game_id, req, tracker)
+    finally:
+        # cancel_hash() holds off new baseline hashes; by now start_update
+        # either marked the game "updating" (busy – no hash starts) or failed.
+        if hasattr(tracker, "release_hash_hold"):
+            tracker.release_hash_hold(game_id)
+
+
+async def _update_game(
+    s: object, g: object, game_id: str, req: UpdateRequest, tracker: object
+) -> DownloadOut:
     state = tracker.state(game_id)
-    if state in ("hashing", "publishing", "updating"):
+    if state == "hashing":
+        # Don't make the user wait for a baseline hash of the *old* version
+        # just to replace it: stop it, the update brings the new manifest.
+        # Without old hashes start_update lets libtorrent check the files once.
+        stopped = await asyncio.to_thread(tracker.cancel_hash, game_id)
+        if not stopped:
+            raise HTTPException(409, "Hash-Berechnung ließ sich nicht abbrechen")
+        g = s.library.get(game_id) or g
+    elif state in ("publishing", "updating"):
         raise HTTPException(409, f"Spiel ist gerade beschäftigt ({state})")
     # Fresh scan so the Phase 6 fast path never trusts a stale "unchanged"
-    # classification (a file edited since the last periodic scan).
-    await asyncio.to_thread(tracker.scan, game_id)
+    # classification (a file edited since the last periodic scan). Without a
+    # baseline there is nothing to compare – and scan() would start the full
+    # hash we just skipped, synchronously in this request.
+    if g.files:
+        await asyncio.to_thread(tracker.scan, game_id)
 
     peers = s.peer_registry.peers_for_version(game_id, req.version_key)
     if not peers:
