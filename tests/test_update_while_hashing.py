@@ -127,7 +127,7 @@ def test_interrupted_hashing_state_is_reset_on_load(isolated_config, tmp_path, m
 
     # "Restart": a new tracker loads the persisted state.
     restarted = ContentTracker(isolated_config, library)
-    assert restarted.state(info.id) == "modified"
+    assert restarted.state(info.id) == "unverified"
     assert restarted.get_entry(info.id)["pending_hash_reason"] == "interrupted"
     assert "hash_progress" not in restarted.get_entry(info.id)
 
@@ -135,3 +135,28 @@ def test_interrupted_hashing_state_is_reset_on_load(isolated_config, tmp_path, m
     restarted.ensure_baseline(info.id)
     assert restarted.state(info.id) == "clean"
     assert game_mod.load_from_path(info.path).files
+
+
+def test_interrupted_publish_is_reset_to_modified(isolated_config, tmp_path, make_game):
+    info = make_game(tmp_path, "Dawnwalker")
+    library = Library()
+    library.add(info)
+    tracker = ContentTracker(isolated_config, library)
+    tracker.set_state(info.id, "publishing")
+
+    restarted = ContentTracker(isolated_config, library)
+    assert restarted.state(info.id) == "modified"
+    assert "pending_hash_reason" not in restarted.get_entry(info.id)
+
+
+def test_update_from_unverified_state(app_with_hashing_game):
+    """After an interrupted hash the game is "unverified" – updatable, and
+    starting the update must not kick off the full hash in the request."""
+    client, info, tracker, transfer = app_with_hashing_game
+    tracker.set_state(info.id, "unverified", pending_hash_reason="interrupted")
+
+    r = client.post(f"/api/games/{info.id}/update", json={"version_key": "v2"})
+
+    assert r.status_code == 202, r.text
+    transfer.start_update.assert_called_once()
+    assert game_mod.load_from_path(info.path).files == {}

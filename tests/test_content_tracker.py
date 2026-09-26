@@ -334,7 +334,7 @@ def test_cancel_hash_stops_baseline_without_writing(
 
     reloaded = game_mod.load_from_path(info.path)
     assert reloaded.files == {}
-    assert tracker.state(info.id) == "modified"
+    assert tracker.state(info.id) == "unverified"
     assert tracker.get_entry(info.id)["pending_hash_reason"] == "update_started"
 
     # While held (update being set up), no new baseline hash starts.

@@ -49,6 +49,9 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
   const versions = data?.versions || [];
   const chosen = versions.find(v => v.version_key === chosenKey);
   const modified = game.content_state === 'modified';
+  // Update replaces the baseline hash of the old version: it is stopped (or
+  // was never finished) and the files on disk get checked by the update.
+  const notHashed = game.content_state === 'hashing' || game.content_state === 'unverified';
 
   const submit = async () => {
     if (!chosenKey) return;
@@ -81,6 +84,12 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
         ${modified && html`
           <div style="font-size:12px;color:var(--danger);background:rgba(220,60,60,0.12);border:1px solid var(--danger);border-radius:8px;padding:8px 10px;margin-bottom:10px">
             ⚠ Lokale Änderungen an diesem Spiel werden überschrieben.
+          </div>
+        `}
+
+        ${notHashed && html`
+          <div style="font-size:12px;color:var(--text-dim);background:rgba(108,142,247,0.12);border:1px solid var(--accent-dim);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+            ${game.content_state === 'hashing' ? 'Die laufende Prüfung wird abgebrochen. ' : ''}Vorhandene Dateien werden beim Update geprüft und wiederverwendet – nur Abweichendes wird geladen.
           </div>
         `}
 

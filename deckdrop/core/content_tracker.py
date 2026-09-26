@@ -26,6 +26,10 @@ from deckdrop.core import game as game_mod
 log = logging.getLogger(__name__)
 
 _BUSY_STATES = ("hashing", "publishing", "updating")
+# "unverified": no file hashes yet and no hash running (interrupted by a
+# restart, or cancelled so an update could start). Not shareable, but not
+# "modified" either – the update option stays available and the next
+# baseline/scan hashes it.
 _EMPTY_SUMMARY: dict[str, int] = {"changed": 0, "removed": 0, "added": 0}
 
 
@@ -95,10 +99,12 @@ class ContentTracker:
                 # sleep). Left as is, ensure_baseline/scan would skip this game
                 # as "busy" forever. "updating" is different: that one is
                 # resumed by the TransferManager and must survive restarts.
-                entry["state"] = "modified"
                 entry.pop("hash_progress", None)
                 if state == "hashing":
+                    entry["state"] = "unverified"
                     entry["pending_hash_reason"] = "interrupted"
+                else:
+                    entry["state"] = "modified"
                 self._save_entry(p.stem, entry)
             self._entries[p.stem] = entry
 
@@ -166,7 +172,7 @@ class ContentTracker:
         """Stop a running baseline hash for `game_id` (e.g. an update was started).
 
         Returns True once no hash is running any more. The cancelled hash does
-        not write anything to the game; the entry becomes "modified" with
+        not write anything to the game; the entry becomes "unverified" with
         `pending_hash_reason="update_started"`, so a later scan redoes it if
         the update never finishes. Also holds off any *new* baseline hash of
         this game (a scan pass could otherwise restart it before the update
@@ -224,7 +230,7 @@ class ContentTracker:
                     self._hash_full(g, cancel)
                 except _HashCancelled:
                     log.info("Baseline hashing for %s cancelled", game_id)
-                    self.set_state(game_id, "modified", pending_hash_reason="update_started")
+                    self.set_state(game_id, "unverified", pending_hash_reason="update_started")
                     return
                 except Exception as exc:
                     log.error("Baseline hashing failed for %s: %s", game_id, exc)
