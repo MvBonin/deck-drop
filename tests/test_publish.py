@@ -61,6 +61,8 @@ def test_publish_unchanged_keeps_revision(published_game):
 
     reloaded = game_mod.load_from_path(info.path)
     assert reloaded.content.revision == 1
+    assert reloaded.content.version_label == "1.1"
+    assert reloaded.content.note == "no-op"
     assert tracker.state(info.id) == "clean"
 
 
@@ -75,6 +77,51 @@ def test_publish_exclude_removes_file_from_manifest(published_game):
     reloaded = game_mod.load_from_path(info.path)
     assert "save.dat" not in reloaded.files
     assert "save.dat" in reloaded.content.ignore
+
+
+def test_publish_after_advanced_snapshot_still_bumps_revision(published_game):
+    """A snapshot moved onto the patched file must not swallow the new version."""
+    from deckdrop.core import content
+
+    cfg, library, tracker, info = published_game
+    (info.path / "bin.exe").write_bytes(b"patched" * 40)
+    snap = content.take_snapshot(info.path, info.files.keys())
+    tracker.set_state(
+        info.id,
+        "clean",
+        snapshot=snap,
+        summary={"changed": 0, "removed": 0, "added": 0},
+        changed=[],
+        removed=[],
+        added=[],
+    )
+
+    with patch("deckdrop.core.torrent_prep.invalidate_torrent"):
+        _run_publish_sync(tracker, info.id, "1.6.8", "Patch", [])
+
+    reloaded = game_mod.load_from_path(info.path)
+    assert reloaded.content.revision == 2
+    assert reloaded.content.version_label == "1.6.8"
+
+
+def test_scan_detects_patch_when_snapshot_already_matches_disk(published_game):
+    from deckdrop.core import content
+
+    cfg, library, tracker, info = published_game
+    (info.path / "bin.exe").write_bytes(b"patched" * 40)
+    snap = content.take_snapshot(info.path, info.files.keys())
+    tracker.set_state(
+        info.id,
+        "clean",
+        snapshot=snap,
+        summary={"changed": 0, "removed": 0, "added": 0},
+        changed=[],
+        removed=[],
+        added=[],
+    )
+
+    assert tracker.scan(info.id) == "modified"
+    assert "bin.exe" in tracker.change_lists(info.id)["changed"]
 
 
 def test_publish_mtime_only_change_is_unchanged(published_game, tmp_path):

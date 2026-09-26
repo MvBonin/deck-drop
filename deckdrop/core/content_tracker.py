@@ -120,12 +120,23 @@ class ContentTracker:
         entry["last_scan"] = time.time()
         for k, v in extra.items():
             entry[k] = v
+        if state not in ("hashing", "publishing"):
+            entry.pop("hash_progress", None)
         self._entries[game_id] = entry
         self._save_entry(game_id, entry)
         self._emit(
             "game_content_state",
             {"game_id": game_id, "state": state, "summary": entry.get("summary", _EMPTY_SUMMARY)},
         )
+
+    def hash_progress(self, game_id: str) -> float | None:
+        """Fraction of files hashed while state is hashing or publishing."""
+        if self.state(game_id) not in ("hashing", "publishing"):
+            return None
+        value = self._entries.get(game_id, {}).get("hash_progress")
+        if value is None:
+            return None
+        return float(value)
 
     # -- baseline --
 
@@ -146,23 +157,72 @@ class ContentTracker:
             return
 
         if not g.files:
-            self.set_state(game_id, "hashing")
+            self.set_state(game_id, "hashing", hash_progress=0.0)
             try:
                 self._hash_full(g)
             except Exception as exc:
                 log.error("Baseline hashing failed for %s: %s", game_id, exc)
                 self.set_state(game_id, "modified")
                 return
-        elif not g.sizes:
+            snapshot = content.take_snapshot(g.path, g.files.keys())
+            self.set_state(
+                game_id,
+                "clean",
+                snapshot=snapshot,
+                summary=dict(_EMPTY_SUMMARY),
+                changed=[],
+                removed=[],
+                added=[],
+            )
+            return
+
+        if not g.sizes and self.state(game_id) != "modified":
             snap = content.take_snapshot(g.path, g.files.keys())
             g.sizes = {rel: snap[rel][0] for rel in snap if rel in g.files}
             game_mod.save(g)
 
-        snapshot = content.take_snapshot(g.path, g.files.keys())
+        # A published manifest already exists. Do not adopt the current disk
+        # as a new clean baseline — a patched game stays unshareable until
+        # the user publishes an update.
+        entry = self._entries.get(game_id, {})
+        if entry.get("snapshot") or self.state(game_id) == "modified":
+            self.scan(game_id)
+            return
+        self._baseline_from_manifest(g)
+
+    def _baseline_from_manifest(self, g: game_mod.GameInfo) -> None:
+        """First snapshot for a game that already has file hashes.
+
+        Sizes that still match disk become the baseline. A size that does not
+        match is a local patch: the game stays modified and is not hashed.
+        """
+        current = content.take_snapshot(g.path, g.files.keys())
+        drifted: list[str] = []
+        for rel in g.files:
+            st = current.get(rel)
+            manifest_size = g.sizes.get(rel)
+            if st is None or (manifest_size is not None and st[0] != manifest_size):
+                drifted.append(rel)
+        if drifted:
+            drifted_set = set(drifted)
+            kept = {rel: current[rel] for rel in current if rel not in drifted_set}
+            self.set_state(
+                g.id,
+                "modified",
+                snapshot=kept,
+                summary={"changed": len(drifted), "removed": 0, "added": 0},
+                changed=sorted(drifted),
+                removed=[],
+                added=[],
+            )
+            transfer = self._transfer()
+            if transfer is not None:
+                transfer.drop_seed(g.id)
+            return
         self.set_state(
-            game_id,
+            g.id,
             "clean",
-            snapshot=snapshot,
+            snapshot=current,
             summary=dict(_EMPTY_SUMMARY),
             changed=[],
             removed=[],
@@ -174,21 +234,39 @@ class ContentTracker:
         files: dict[str, str] = {}
         sizes: dict[str, int] = {}
         total = 0
+        n = len(rels) or 1
+        done = 0
         for rel in rels:
             path = g.path / rel
             try:
                 st = path.stat()
             except OSError:
+                done += 1
+                self._note_hash_progress(g.id, done / n)
                 continue
             files[rel] = integrity.hash_file(path)
             sizes[rel] = st.st_size
             total += st.st_size
+            done += 1
+            self._note_hash_progress(g.id, done / n)
         g.files = files
         g.sizes = sizes
         g.size_bytes = total
         if not g.content.content_hash:
             g.content.content_hash = content.compute_content_hash(files, sizes)
         game_mod.save(g)
+
+    def _note_hash_progress(self, game_id: str, progress: float) -> None:
+        entry = dict(self._entries.get(game_id, {}))
+        prev = float(entry.get("hash_progress") or 0.0)
+        entry["hash_progress"] = progress
+        self._entries[game_id] = entry
+        if progress >= 1 or progress - prev >= 0.01:
+            self._save_entry(game_id, entry)
+        self._emit(
+            "content_publish_progress",
+            {"game_id": game_id, "progress": progress},
+        )
 
     # -- scanning --
 
@@ -220,17 +298,31 @@ class ContentTracker:
                 changed.append(rel)
                 continue
             if new_hash == g.files.get(rel):
+                # Hash still matches the manifest: the snapshot may move forward.
                 snapshot[rel] = [st.st_size, st.st_mtime_ns]
             else:
                 changed.append(rel)
 
-        for rel in result.changed:
-            path = g.path / rel
+        # Snapshot stays at the stat from the last published hash. Moving it
+        # forward for a size change made the next scan (and publish) treat the
+        # patch as unchanged, so the typed version never replaced Rev. 1.
+        # A snapshot already moved forward still matches disk; the published
+        # size does not, so those files count as changed too.
+        removed_set = set(result.removed)
+        seen = set(changed)
+        for rel, manifest_size in g.sizes.items():
+            if rel in seen or rel in removed_set:
+                continue
+            path = content.safe_join(g.path, rel)
+            if path is None:
+                continue
             try:
                 st = path.stat()
-                snapshot[rel] = [st.st_size, st.st_mtime_ns]
             except OSError:
-                pass
+                continue
+            if st.st_size != manifest_size:
+                changed.append(rel)
+                seen.add(rel)
 
         changed = sorted(set(changed))
         removed = result.removed
@@ -323,19 +415,31 @@ class ContentTracker:
                     continue
                 old_hash = g.files.get(rel)
                 snap = old_snapshot.get(rel)
-                if old_hash and snap and snap[0] == st.st_size and snap[1] == st.st_mtime_ns:
+                manifest_size = g.sizes.get(rel)
+                # Reuse the manifest hash only when this exact size and mtime
+                # were already hashed. A snapshot that was advanced without a
+                # new hash must not hide a patch.
+                if (
+                    old_hash
+                    and isinstance(snap, (list, tuple))
+                    and len(snap) >= 2
+                    and snap[0] == st.st_size
+                    and snap[1] == st.st_mtime_ns
+                    and manifest_size == st.st_size
+                ):
                     h = old_hash
                 else:
                     h = integrity.hash_file(path)
                 files[rel] = h
                 sizes[rel] = st.st_size
-                self._emit(
-                    "content_publish_progress",
-                    {"game_id": game_id, "progress": (i + 1) / total},
-                )
+                self._note_hash_progress(game_id, (i + 1) / total)
 
             new_hash = content.compute_content_hash(files, sizes)
             if new_hash and new_hash == g.content.content_hash and ignore == g.content.ignore:
+                # Same files: still keep a version name the user typed (e.g. 1.0.5
+                # from a patch that was already in the folder). No new revision
+                # and no torrent rebuild — peers see the label on the same content.
+                label_updated = self._apply_label(g, version_label, note)
                 snapshot = content.take_snapshot(g.path, files.keys())
                 self.set_state(
                     game_id,
@@ -346,11 +450,13 @@ class ContentTracker:
                     removed=[],
                     added=[],
                 )
+                self._reseed(game_id, g.path)
                 self._emit(
                     "content_publish_complete",
                     {
                         "game_id": game_id,
                         "unchanged": True,
+                        "label_updated": label_updated,
                         "revision": g.content.revision,
                         "version_label": g.content.version_label,
                     },
@@ -418,6 +524,39 @@ class ContentTracker:
                 self._publishing.discard(game_id)
 
     # -- helpers --
+
+    def _apply_label(self, g: game_mod.GameInfo, version_label: str, note: str) -> bool:
+        """Store a version name on the current revision. Returns True if saved."""
+        label_changed = bool(version_label) and version_label != g.content.version_label
+        note_changed = bool(note) and note != g.content.note
+        if not label_changed and not note_changed:
+            return False
+        now = _now()
+        user = getattr(self._cfg, "user_name", "")
+        if label_changed:
+            g.content.version_label = version_label
+        if note_changed:
+            g.content.note = note
+        g.content.updated_by = user
+        g.content.updated_at = now
+        for entry in reversed(g.history):
+            if entry.revision != g.content.revision:
+                continue
+            if label_changed:
+                entry.version_label = version_label
+            if note_changed:
+                entry.note = note
+            break
+        game_mod.save(g)
+        return True
+
+    def _reseed(self, game_id: str, game_path: Path) -> None:
+        transfer = self._transfer()
+        if transfer is None:
+            return
+        cache = Path(self._cfg.torrent_cache) / f"{game_id}.torrent"
+        if cache.is_file():
+            transfer.seed_from_cache(game_id, game_path, cache)
 
     def _transfer(self) -> object | None:
         try:

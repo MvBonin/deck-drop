@@ -43,3 +43,33 @@ def test_lifespan_hands_baseline_to_a_background_thread():
     assert "threading.Thread" in lifespan_source
     assert "target=_baseline_all_then_scan" in lifespan_source
     assert "for g in library.all():\n            content_tracker.ensure_baseline" not in source
+
+
+def test_should_schedule_prepare_skips_modified_games():
+    from deckdrop.main import _should_schedule_prepare
+
+    game = MagicMock()
+    game.id = "g1"
+    game.origin.peer_id = ""
+    game.origin.peer_name = ""
+    game.torrent.magnet = ""
+    tracker = MagicMock()
+    tracker.state.return_value = "modified"
+
+    assert _should_schedule_prepare(game, MagicMock(), tracker) is False
+
+
+def test_should_schedule_prepare_when_torrent_missing(monkeypatch):
+    from deckdrop.core import torrent_prep
+    from deckdrop.main import _should_schedule_prepare
+
+    game = MagicMock()
+    game.id = "g1"
+    game.origin.peer_id = ""
+    game.origin.peer_name = ""
+    game.torrent.magnet = ""
+    tracker = MagicMock()
+    tracker.state.return_value = "clean"
+    monkeypatch.setattr(torrent_prep, "has_cached_torrent", lambda cfg, game_id: False)
+
+    assert _should_schedule_prepare(game, MagicMock(), tracker) is True

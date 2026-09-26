@@ -93,19 +93,28 @@ class GameOut(BaseModel):
         has_torrent = bool(g.torrent.magnet)
         # Peer downloads do not need local torrent prep (only locally shared games do).
         local_share = not (g.origin.peer_id or g.origin.peer_name)
-        preparing = torrent_prep.is_preparing(g.id) or (
-            local_share
-            and not has_torrent
-            and prep_error is None
-            and not torrent_prep.has_cached_torrent(cfg, g.id)
+        content_state = tracker.state(g.id)
+        content_hashing = content_state in ("hashing", "publishing")
+        preparing = (
+            torrent_prep.is_preparing(g.id)
+            or content_hashing
+            or (
+                local_share
+                and content_state != "modified"
+                and not has_torrent
+                and prep_error is None
+                and not torrent_prep.has_cached_torrent(cfg, g.id)
+            )
         )
         prep_progress: float | None = None
         if preparing:
-            prep_progress = torrent_prep.get_progress(g.id)
+            if torrent_prep.is_preparing(g.id):
+                prep_progress = torrent_prep.get_progress(g.id)
+            elif content_hashing:
+                prep_progress = tracker.hash_progress(g.id)
             if prep_progress is None:
                 prep_progress = 0.0
         local_cover = has_local_cover(g.path)
-        content_state = tracker.state(g.id)
         best_update = s.peer_registry.best_update_for(g.id, g.content.revision)
         update_version_label = ""
         if best_update is not None:

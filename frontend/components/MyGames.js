@@ -88,8 +88,17 @@ export function MyGames({ wsEvent, showToast }) {
     }
     if (wsEvent.event === 'game_content_state') {
       const { state, summary } = wsEvent.data;
+      const hashing = state === 'hashing' || state === 'publishing';
+      if (hashing) setPrepById(p => ({ ...p, [id]: p[id] ?? 0 }));
       setGames(gs => gs.map(g => g.id === id
-        ? { ...g, content_state: state, change_summary: summary ?? g.change_summary, shareable: state === 'clean' && g.has_torrent }
+        ? {
+            ...g,
+            content_state: state,
+            change_summary: summary ?? g.change_summary,
+            shareable: state === 'clean' && g.has_torrent,
+            torrent_preparing: hashing ? true : g.torrent_preparing,
+            torrent_prep_progress: hashing ? (g.torrent_prep_progress ?? 0) : g.torrent_prep_progress,
+          }
         : g));
     }
     if (wsEvent.event === 'content_publish_progress') {
@@ -99,9 +108,16 @@ export function MyGames({ wsEvent, showToast }) {
         : g));
     }
     if (wsEvent.event === 'content_publish_complete') {
-      setPrepById(p => { const n = { ...p }; delete n[id]; return n; });
+      if (wsEvent.data.unchanged) {
+        setPrepById(p => { const n = { ...p }; delete n[id]; return n; });
+        setGames(gs => gs.map(g => g.id === id
+          ? { ...g, torrent_preparing: false, torrent_prep_progress: null }
+          : g));
+      }
       if (!wsEvent.data.unchanged) {
         showToast(`Update ${wsEvent.data.version_label || ''} veröffentlicht`.trim());
+      } else if (wsEvent.data.label_updated) {
+        showToast(`Version ${wsEvent.data.version_label || ''} gespeichert`.trim());
       }
       load();
     }
@@ -124,7 +140,9 @@ export function MyGames({ wsEvent, showToast }) {
 
   // Poll while any game is still preparing (e.g. after page reload)
   useEffect(() => {
-    const needsPoll = games.some(g => g.torrent_preparing);
+    const needsPoll = games.some(g =>
+      g.torrent_preparing || g.content_state === 'hashing' || g.content_state === 'publishing'
+    );
     if (!needsPoll) return;
     const t = setInterval(load, 3000);
     return () => clearInterval(t);

@@ -49,7 +49,10 @@ export function GameCard({
   const hostPreparing = mode === 'network'
     && !game.has_torrent
     && !game.torrent_prep_error;
-  const ownPreparing = mode === 'own' && game.torrent_preparing;
+  const hashing = mode === 'own' && (
+    game.content_state === 'hashing' || game.content_state === 'publishing'
+  );
+  const ownPreparing = mode === 'own' && (game.torrent_preparing || hashing);
   const installedNoUpdate = mode === 'network' && game.installed && !game.update_available;
   const installedWithUpdate = mode === 'network' && game.installed && game.update_available;
   const versionCount = mode === 'network' ? (game.version_count ?? 1) : 1;
@@ -85,10 +88,10 @@ export function GameCard({
       <${CoverImage} game=${game} mode=${mode} />
       <div class="card-body">
         <div class="card-name">${game.name}</div>
-        ${mode === 'own' && html`
+        ${(mode === 'own' || game.version_label) && html`
           <div class="card-version">
             ${versionLabel}
-            ${game.update_available && !updating && html`
+            ${mode === 'own' && game.update_available && !updating && html`
               <span class="badge badge-success" style="margin-left:6px">
                 Update verfügbar: ${game.update_version_label || 'verfügbar'}
               </span>

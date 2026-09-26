@@ -178,6 +178,7 @@ class PeerRegistry:
                 "content_hash",
                 "content_state",
                 "revision",
+                "version_label",
             ):
                 if og.get(key) != ng.get(key):
                     return True
@@ -323,6 +324,23 @@ class PeerRegistry:
                 local.updated_by = rg.get("updated_by", local.updated_by)
                 game_mod.save(local)
                 log.info("Metadata synced for game %s (v%d from peer)", game_id, remote_version)
+
+            # Same files, but the host named the revision (e.g. "1.0.5") after
+            # this copy was taken. Fill an empty local label so My Games matches.
+            remote_label = (rg.get("version_label") or "").strip()
+            remote_hash = rg.get("content_hash") or ""
+            if (
+                remote_label
+                and remote_hash
+                and remote_hash == local.content.content_hash
+                and not (local.content.version_label or "").strip()
+            ):
+                local.content.version_label = remote_label
+                remote_note = (rg.get("version_note") or "").strip()
+                if remote_note and not local.content.note:
+                    local.content.note = remote_note
+                game_mod.save(local)
+                log.info("Version label synced for game %s (%s)", game_id, remote_label)
 
             # Comment sync: fetch remote comments and merge
             await self._sync_comments(game_id, local, address, port)

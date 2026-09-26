@@ -192,6 +192,12 @@ def test_games_changed_detects_has_torrent(registry):
     assert PeerRegistry._games_changed(old, new) is True
 
 
+def test_games_changed_detects_version_label(registry):
+    old = [{"id": "a", "version_label": ""}]
+    new = [{"id": "a", "version_label": "1.0.5"}]
+    assert PeerRegistry._games_changed(old, new) is True
+
+
 @pytest.mark.asyncio
 async def test_sync_from_peer_relinks_legacy_id(tmp_path, monkeypatch, registry):
     """A previously-downloaded game with the old (wrong) ID gets relinked."""
@@ -235,3 +241,48 @@ async def test_sync_from_peer_relinks_legacy_id(tmp_path, monkeypatch, registry)
 
     assert lib.get("hostid123") is not None
     assert lib.get(old_id) is None
+
+
+@pytest.mark.asyncio
+async def test_sync_from_peer_fills_empty_version_label(tmp_path, monkeypatch, registry):
+    from deckdrop.api import state as app_state
+    from deckdrop.core import config as cfg_mod
+    from deckdrop.core import game as game_mod
+    from deckdrop.core.library import Library
+
+    monkeypatch.setattr(cfg_mod, "CONFIG_PATH", tmp_path / "config.toml")
+    cfg = cfg_mod.load()
+    cfg.download_dir = tmp_path / "games"
+    cfg_mod.save(cfg)
+
+    game_dir = cfg.download_dir / "Dawnwalker"
+    game_dir.mkdir(parents=True)
+    info = game_mod.create_new(game_dir, "The Blood of Dawnwalker", added_by="deckuser")
+    info.content.content_hash = "abc123"
+    info.content.version_label = ""
+    game_mod.save(info)
+
+    lib = Library()
+    lib.reload(cfg)
+    app_state.init(cfg, lib)
+    registry.set_library(lib)
+
+    remote_game = {
+        "id": info.id,
+        "name": info.name,
+        "version": info.version,
+        "content_hash": "abc123",
+        "version_label": "1.0.5",
+        "version_note": "Patch",
+    }
+
+    with respx.mock:
+        respx.get(f"http://192.168.1.10:7373/api/games/{info.id}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        await registry._sync_from_peer("peer1", [remote_game], "192.168.1.10", 7373)
+
+    reloaded = game_mod.load_from_path(game_dir)
+    assert reloaded.content.version_label == "1.0.5"
+    assert reloaded.content.note == "Patch"
+    assert reloaded.content.revision == 1

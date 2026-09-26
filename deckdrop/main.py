@@ -5,6 +5,26 @@ from __future__ import annotations
 import argparse
 
 
+def _should_schedule_prepare(game: object, cfg: object, tracker: object) -> bool:
+    """True when startup should build a torrent for this game.
+
+    Modified games stay unshareable until the user publishes an update.
+    Preparing a torrent for them would hash and share the patched files.
+    """
+    if getattr(game, "origin", None) and (
+        game.origin.peer_id or game.origin.peer_name  # type: ignore[attr-defined]
+    ):
+        return False
+    if tracker.state(game.id) == "modified":  # type: ignore[attr-defined]
+        return False
+    torrent = getattr(game, "torrent", None)
+    if torrent is not None and torrent.magnet:
+        return False
+    from deckdrop.core import torrent_prep
+
+    return not torrent_prep.has_cached_torrent(cfg, game.id)  # type: ignore[attr-defined]
+
+
 def _baseline_all_then_scan(library: object, content_tracker: object) -> None:
     """Baseline every game, then kick off a scan pass – run in a background thread.
 
@@ -181,9 +201,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
             logging.getLogger(__name__).info("Torrent cache restored for %d game(s)", restored)
         for g in library.all():
-            if g.origin.peer_id or g.origin.peer_name:
-                continue
-            if not g.torrent.magnet and not torrent_prep.has_cached_torrent(cfg, g.id):
+            if _should_schedule_prepare(g, cfg, content_tracker):
                 torrent_prep.schedule_prepare(g.id)
 
         threading.Thread(
