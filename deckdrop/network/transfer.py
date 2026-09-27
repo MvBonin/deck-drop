@@ -51,6 +51,7 @@ class DownloadStatus:
     # Phase 5: update downloads (see docs/plans/game-updates.md "5.1").
     kind: str = "new"  # "new" | "update"
     target_version_label: str = ""
+    repair: bool = False  # update run as "Reparieren": full recheck, no trust
 
 
 @dataclass
@@ -105,6 +106,9 @@ class _PersistedRecord:
     # version or rebuilt the torrent mid-update): deleted at finalize unless
     # the final version still has them.
     stale_files: list[str] = field(default_factory=list)
+    # "Reparieren": same mechanics as an update, but nothing on disk is
+    # trusted – libtorrent rechecks every piece and fetches what differs.
+    repair: bool = False
 
 
 class UpdateAlreadyRunning(RuntimeError):
@@ -671,8 +675,13 @@ class TransferManager:
         download_id: str | None = None,
         *,
         background: bool = False,
+        repair: bool = False,
     ) -> str:
         """Start applying an update in place (docs/plans/game-updates.md "5.2").
+
+        `repair=True` ("Reparieren"): same flow for a chosen version, but
+        nothing on disk is trusted – no have_pieces fast path; libtorrent
+        rechecks every piece (force_recheck) and downloads what differs.
 
         Unlike `start_download`, this never touches a fresh destination
         folder: it prepares the *existing* game folder (moves/copies/
@@ -727,7 +736,7 @@ class TransferManager:
             stale_files: list[str] = []
             running = self.active_update_for(game.id)
             if running is not None:
-                if running.info_hash and running.info_hash == info_hash:
+                if running.info_hash and running.info_hash == info_hash and not repair:
                     raise UpdateAlreadyRunning("Dieses Update läuft bereits.")
                 stale_files = self._replace_running_update(running, target_version_label)
 
@@ -750,6 +759,7 @@ class TransferManager:
                 preparing=True,
                 target_revision=int(content_block.get("revision") or 0),
                 stale_files=stale_files,
+                repair=repair,
             )
             if torrent_bytes:
                 self._resume_store.save_torrent(download_id, info_hash, torrent_bytes)
@@ -853,7 +863,12 @@ class TransferManager:
         new_files: dict[str, str] = dict(manifest.get("files") or {})
         new_sizes: dict[str, int] = dict(manifest.get("sizes") or {})
         new_ignore = list((manifest.get("content") or {}).get("ignore") or [])
-        if game.files:
+        if rec.repair:
+            # Trust nothing: every file on disk counts as "changed" (so a too
+            # long one is truncated); libtorrent's recheck decides the rest.
+            diff = content.diff_without_baseline(game_path, new_files, new_sizes)
+            reason = "repair"
+        elif game.files:
             diff = content.diff_manifests(game.files, game.sizes, new_files, new_sizes)
             reason = "update_reuse_local"
         else:
@@ -905,6 +920,10 @@ class TransferManager:
                 params = lt.add_torrent_params()
                 params.ti = ti
                 params.save_path = str(game_path.parent)
+                if rec.repair:
+                    prep.params = params  # no have_pieces: full recheck after add
+                    prep.progress = 1.0
+                    return
                 self._apply_have_pieces_fast_path(
                     lt,
                     ti,
@@ -954,6 +973,15 @@ class TransferManager:
                 continue
             try:
                 handle = self._session.add_torrent(prep.params)
+                if rec.repair:
+                    # Like "Recheck" in a BitTorrent client: read every piece
+                    # on disk, then fetch only what is missing or broken.
+                    from deckdrop.core import debuglog
+
+                    debuglog.record(
+                        "recheck", "repair", rec.game_id, detail=rec.target_version_label
+                    )
+                    handle.force_recheck()
                 address = rec.peer_address or self._peer_address_for(rec)
                 if address:
                     handle.connect_peer((address, self._cfg.torrent_port))
@@ -1973,6 +2001,7 @@ class TransferManager:
             phase_progress=phase_progress,
             kind=rec.kind,
             target_version_label=rec.target_version_label,
+            repair=rec.repair,
         )
 
     def _build_status(self, h: _Handle) -> DownloadStatus:
@@ -2056,6 +2085,7 @@ class TransferManager:
                 stall_seconds=max(0, stall_seconds),
                 kind=rec.kind if rec else "new",
                 target_version_label=rec.target_version_label if rec else "",
+                repair=bool(rec and rec.repair),
             )
             if rec:
                 self._sync_rec_from_status(rec, out)
@@ -2088,6 +2118,7 @@ class TransferManager:
                 phase="error",
                 kind=rec.kind if rec else "new",
                 target_version_label=rec.target_version_label if rec else "",
+                repair=bool(rec and rec.repair),
             )
             return out
 
@@ -2139,6 +2170,7 @@ class TransferManager:
             "peer_name": status.peer_name,
             "kind": status.kind,
             "target_version_label": status.target_version_label,
+            "repair": status.repair,
             "progress": status.progress,
             "speed_bytes_sec": status.speed_bytes_sec,
             "downloaded_bytes": status.downloaded_bytes,

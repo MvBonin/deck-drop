@@ -219,3 +219,20 @@ def test_route_restarts_running_update_and_rejects_same(env, monkeypatch):
     assert r.status_code == 409
     assert "läuft bereits" in r.json()["detail"]
     assert tracker.state(info.id) == "updating"
+
+
+def test_repair_replaces_running_update_even_with_same_torrent(env):
+    tm, info, _tracker = env
+    v2 = _manifest(info, 2, "1.0.5", {"bin.exe": "h"}, {"bin.exe": 100})
+    first = tm.start_update(info, PEERS, b"torrent-v2", v2)
+    fast_path = MagicMock()
+    tm._apply_have_pieces_fast_path = fast_path
+
+    second = tm.start_update(info, PEERS, b"torrent-v2", v2, repair=True)
+
+    assert second != first and first not in tm._paused
+    rec = tm._paused[second]
+    assert rec.repair is True
+    fast_path.assert_not_called()  # nothing on disk is trusted
+    tm._handles[second].handle.force_recheck.assert_called_once()
+    assert tm.get_status(second).repair is True

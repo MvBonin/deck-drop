@@ -89,7 +89,7 @@ def test_update_cancels_running_baseline_hash(app_with_hashing_game, monkeypatch
     assert not hasher.is_alive()
     transfer.start_update.assert_called_once()
     # Preparation runs in the background – the request doesn't wait for it.
-    assert transfer.start_update.call_args.kwargs == {"background": True}
+    assert transfer.start_update.call_args.kwargs == {"background": True, "repair": False}
     game_arg = transfer.start_update.call_args.args[0]
     assert game_arg.files == {}  # old version never got hashed
     assert game_mod.load_from_path(info.path).files == {}
@@ -162,3 +162,22 @@ def test_update_from_unverified_state(app_with_hashing_game):
     assert r.status_code == 202, r.text
     transfer.start_update.assert_called_once()
     assert game_mod.load_from_path(info.path).files == {}
+
+
+def test_repair_uses_chosen_peer_and_repair_mode(app_with_hashing_game, monkeypatch):
+    client, info, _tracker, transfer = app_with_hashing_game
+    from deckdrop.api import state as app_state
+
+    a = SimpleNamespace(peer_id="deck2", name="Deck 2", address="192.168.1.6", port=7373)
+    b = SimpleNamespace(peer_id="pc", name="PC", address="192.168.1.5", port=7373)
+    app_state.get().peer_registry.peers_for_version.return_value = [a, b]
+
+    r = client.post(f"/api/games/{info.id}/repair", json={"version_key": "v1", "peer_id": "pc"})
+
+    assert r.status_code == 202, r.text
+    args, kwargs = transfer.start_update.call_args
+    assert [p.peer_id for p in args[1]] == ["pc", "deck2"]  # chosen source first
+    assert kwargs == {"background": True, "repair": True}
+
+    r = client.post(f"/api/games/{info.id}/repair", json={"version_key": "v1", "peer_id": "nope"})
+    assert r.status_code == 404

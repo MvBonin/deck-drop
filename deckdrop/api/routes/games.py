@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from functools import partial
 from pathlib import Path
 from urllib.parse import quote
 
@@ -694,6 +695,8 @@ async def get_updates(game_id: str) -> dict:
 
 class UpdateRequest(BaseModel):
     version_key: str
+    # Optional source peer (repair dialog: "welche Version von wo").
+    peer_id: str | None = None
 
 
 @router.post(
@@ -723,8 +726,41 @@ async def update_game(game_id: str, req: UpdateRequest) -> DownloadOut:
             tracker.release_hash_hold(game_id)
 
 
+@router.post(
+    "/games/{game_id}/repair",
+    response_model=DownloadOut,
+    status_code=202,
+    dependencies=[Depends(local_only)],
+)
+async def repair_game(game_id: str, req: UpdateRequest) -> DownloadOut:
+    """Repair ("Reparieren"): fetch the chosen version's torrent from the chosen peer,
+    recheck every file against it (like "Recheck" in a BitTorrent client)
+    and download whatever is missing or broken."""
+    s = app_state.get()
+    if s.transfer is None:
+        raise HTTPException(503, "Transfer nicht verfügbar (libtorrent nicht installiert)")
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+
+    tracker = s.get_content_tracker()
+    try:
+        return await _update_game(s, g, game_id, req, tracker, repair=True)
+    finally:
+        # cancel_hash() holds off new baseline hashes; by now start_update
+        # either marked the game "updating" (busy – no hash starts) or failed.
+        if hasattr(tracker, "release_hash_hold"):
+            tracker.release_hash_hold(game_id)
+
+
 async def _update_game(
-    s: object, g: object, game_id: str, req: UpdateRequest, tracker: object
+    s: object,
+    g: object,
+    game_id: str,
+    req: UpdateRequest,
+    tracker: object,
+    *,
+    repair: bool = False,
 ) -> DownloadOut:
     from deckdrop.network.transfer import UpdateAlreadyRunning
 
@@ -748,6 +784,11 @@ async def _update_game(
     peers = s.peer_registry.peers_for_version(game_id, req.version_key)
     if not peers:
         raise HTTPException(404, f"Version {req.version_key} nicht gefunden oder kein Peer online")
+    if req.peer_id:
+        chosen = [p for p in peers if p.peer_id == req.peer_id]
+        if not chosen:
+            raise HTTPException(404, "Gewählter Peer bietet diese Version nicht (mehr) an")
+        peers = chosen + [p for p in peers if p.peer_id != req.peer_id]
 
     primary = peers[0]
     manifest = await asyncio.to_thread(_fetch_peer_manifest, primary.address, primary.port, game_id)
@@ -761,7 +802,15 @@ async def _update_game(
         # Returns right away: local prep + reading existing pieces run in the
         # background and show up in "Downloads" as phase "preparing".
         download_id = await asyncio.to_thread(
-            s.transfer.start_update, g, peers, torrent_bytes, manifest, background=True
+            partial(
+                s.transfer.start_update,
+                g,
+                peers,
+                torrent_bytes,
+                manifest,
+                background=True,
+                repair=repair,
+            )
         )
     except UpdateAlreadyRunning as exc:
         raise HTTPException(409, str(exc)) from exc

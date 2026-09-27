@@ -37,7 +37,7 @@ function CoverImage({ game, mode = 'own' }) {
 }
 
 export function GameCard({
-  game, mode = 'own', onAction, onEdit, onComments, onPublish, onUpdate, onRestore,
+  game, mode = 'own', onAction, onEdit, onComments, onPublish, onUpdate, onRestore, onRepair,
   disabled, prepProgress, updateProgress,
 }) {
   const unavailable = mode === 'own' && !game.available;
@@ -207,6 +207,16 @@ export function GameCard({
               title="Kommentare"
               aria-label="Kommentare anzeigen"
             >💬</button>
+          `}
+          ${mode === 'own' && onRepair && html`
+            <button
+              class="btn btn-ghost"
+              style="padding:6px 10px;font-size:15px;min-width:36px"
+              onClick=${e => { e.stopPropagation(); onRepair(); }}
+              tabIndex=${-1}
+              title="Reparieren"
+              aria-label="Spiel reparieren"
+            >🔧</button>
           `}
           ${mode === 'own' && onEdit && html`
             <button

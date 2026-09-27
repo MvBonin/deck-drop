@@ -52,6 +52,7 @@ REASON_TEXT: dict[str, str] = {
     "interrupted": "Nachgeholt: Hash wurde durch Beenden/Neustart unterbrochen",
     "relinked": "Legacy-ID korrigiert – Prüfung läuft unter der neuen ID weiter",
     "stall": "Download hängt – einmalige Neuprüfung",
+    "repair": "Reparieren – alle Dateien werden gegen den Torrent geprüft, Fehlendes geladen",
     "update_replaced": (
         "Laufendes Update ersetzt (neue Version oder neuer Torrent beim Host) – "
         "Geladenes wird wiederverwendet"

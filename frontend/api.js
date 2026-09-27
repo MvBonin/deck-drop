@@ -54,6 +54,8 @@ export const api = {
   publishUpdate:    (id, body)        => post(`/api/games/${id}/publish`, body),
   getUpdates:       (id)              => get(`/api/games/${id}/updates`),
   startUpdate:      (id, versionKey)  => post(`/api/games/${id}/update`, { version_key: versionKey }),
+  repairGame:       (id, versionKey, peerId) =>
+    post(`/api/games/${id}/repair`, { version_key: versionKey, peer_id: peerId }),
   debug:            (gameId)          =>
     get('/api/debug' + (gameId ? `?game_id=${encodeURIComponent(gameId)}` : '')),
 };
