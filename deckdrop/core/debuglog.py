@@ -29,6 +29,7 @@ KIND_TEXT: dict[str, str] = {
     "manifest_check": "Manifest ↔ Torrent abgleichen (ohne Lesen)",
     "torrent_build": "Torrent erstellen (liest alle Dateien)",
     "relink": "Spiel-ID an den Host angeglichen (Legacy-Download)",
+    "update": "Update",
 }
 
 # reason: why it happens
@@ -51,6 +52,11 @@ REASON_TEXT: dict[str, str] = {
     "interrupted": "Nachgeholt: Hash wurde durch Beenden/Neustart unterbrochen",
     "relinked": "Legacy-ID korrigiert – Prüfung läuft unter der neuen ID weiter",
     "stall": "Download hängt – einmalige Neuprüfung",
+    "repair": "Reparieren – alle Dateien werden gegen den Torrent geprüft, Fehlendes geladen",
+    "update_replaced": (
+        "Laufendes Update ersetzt (neue Version oder neuer Torrent beim Host) – "
+        "Geladenes wird wiederverwendet"
+    ),
     "torrent_rebuilt": "Torrent neu erstellt – Seed prüft Dateien neu",
     "torrent_missing": "Kein Torrent vorhanden – wird aus den Dateien erstellt",
     "torrent_forced": "Torrent wird neu erstellt (Inhalt oder Metadaten geändert)",

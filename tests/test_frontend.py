@@ -125,3 +125,80 @@ def test_downloads_show_update_preparation(page: Page, live_server_url: str) -> 
     expect(page.get_by_text("Update: Dawnwalker → 1.0.5")).to_be_visible(timeout=10_000)
     expect(page.get_by_text("Prüfe vorhandene Dateien 42 %")).to_be_visible()
     expect(page.get_by_role("button", name="Pause")).to_be_visible()
+
+
+def test_restart_button_while_update_runs(page: Page, live_server_url: str) -> None:
+    """A running update whose host moved on offers "Update neu starten"."""
+    game = {
+        "id": "dawn1",
+        "name": "Dawnwalker",
+        "version": 1,
+        "size_bytes": 1024,
+        "platform": "linux",
+        "available": True,
+        "added_by": "E2EUser",
+        "updated_at": "2026-09-26T00:00:00+00:00",
+        "has_torrent": True,
+        "content_state": "updating",
+        "revision": 1,
+        "version_label": "1.0",
+        "update_available": True,
+        "update_version_label": "1.0.6",
+        "update_restart_available": True,
+        "update_restart_label": "1.0.6",
+    }
+    page.route("**/api/games", lambda route: route.fulfill(json=[game]))
+    page.goto(live_server_url, wait_until="domcontentloaded")
+
+    card = page.get_by_role("article", name="Dawnwalker")
+    expect(card.get_by_text("Wird aktualisiert…", exact=False)).to_be_visible(timeout=10_000)
+    expect(card.get_by_role("button", name="Update neu starten: 1.0.6…")).to_be_visible()
+
+
+def test_repair_dialog_offers_version_and_source(page: Page, live_server_url: str) -> None:
+    game = {
+        "id": "dawn1",
+        "name": "Dawnwalker",
+        "version": 1,
+        "size_bytes": 1024,
+        "platform": "linux",
+        "available": True,
+        "added_by": "E2EUser",
+        "updated_at": "2026-09-26T00:00:00+00:00",
+        "has_torrent": True,
+        "content_state": "clean",
+        "revision": 2,
+        "version_label": "1.0.5",
+    }
+    updates = {
+        "current": {
+            "revision": 2,
+            "version_label": "1.0.5",
+            "content_hash": "k2",
+            "state": "clean",
+        },
+        "versions": [
+            {
+                "version_key": "k2",
+                "revision": 2,
+                "version_label": "1.0.5",
+                "shareable": True,
+                "has_torrent": True,
+                "is_current": True,
+                "is_newer": False,
+                "peers": [
+                    {"peer_id": "pc", "peer_name": "MVB Desktop"},
+                    {"peer_id": "d2", "peer_name": "Deck 2"},
+                ],
+            }
+        ],
+    }
+    page.route("**/api/games", lambda route: route.fulfill(json=[game]))
+    page.route("**/api/games/dawn1/updates", lambda route: route.fulfill(json=updates))
+    page.goto(live_server_url, wait_until="domcontentloaded")
+
+    page.get_by_role("button", name="Spiel reparieren").click()
+    dialog = page.get_by_role("dialog", name="Spiel reparieren")
+    expect(dialog.get_by_text("1.0.5").first).to_be_visible(timeout=10_000)
+    expect(dialog.get_by_label("Quelle")).to_have_value("pc")
+    expect(dialog.get_by_role("button", name="Reparieren", exact=True)).to_be_enabled()

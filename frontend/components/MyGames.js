@@ -8,6 +8,7 @@ import { EditGame } from './EditGame.js';
 import { Comments } from './Comments.js';
 import { PublishUpdate } from './PublishUpdate.js';
 import { UpdateGame } from './UpdateGame.js';
+import { RepairGame } from './RepairGame.js';
 import { useGridNav } from '../app.js';
 
 export function MyGames({ wsEvent, showToast }) {
@@ -20,6 +21,7 @@ export function MyGames({ wsEvent, showToast }) {
   const [commentsGame, setCommentsGame] = useState(null);
   const [publishGame, setPublishGame] = useState(null);
   const [updateGame, setUpdateGame]   = useState(null);
+  const [repairGame, setRepairGame]   = useState(null);
   const gridRef = useRef(null);
   useGridNav(gridRef);
 
@@ -224,6 +226,7 @@ export function MyGames({ wsEvent, showToast }) {
                   onComments=${() => setCommentsGame(g)}
                   onPublish=${() => setPublishGame(g)}
                   onUpdate=${() => setUpdateGame(g)}
+                  onRepair=${() => setRepairGame(g)}
                   onRestore=${() => onRestore(g)}
                 />
               `)}
@@ -245,6 +248,13 @@ export function MyGames({ wsEvent, showToast }) {
           game=${publishGame}
           onClose=${() => setPublishGame(null)}
           onPublished=${() => { setPublishGame(null); showToast('Update wird vorbereitet…'); }}
+        />
+      `}
+      ${repairGame && html`
+        <${RepairGame}
+          game=${repairGame}
+          onClose=${() => setRepairGame(null)}
+          onStarted=${() => { setRepairGame(null); showToast('Reparatur gestartet – Fortschritt unter „Downloads“'); load(); }}
         />
       `}
       ${updateGame && html`

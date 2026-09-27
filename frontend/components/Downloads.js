@@ -76,9 +76,11 @@ function endSprintDetail(dl, pct) {
 
 function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
   const isUpdate = dl.kind === 'update';
-  const displayName = isUpdate
-    ? `Update: ${dl.game_name} → ${dl.target_version_label || '?'}`
-    : dl.game_name;
+  const displayName = dl.repair
+    ? `Reparatur: ${dl.game_name} (${dl.target_version_label || '?'})`
+    : isUpdate
+      ? `Update: ${dl.game_name} → ${dl.target_version_label || '?'}`
+      : dl.game_name;
   const pct = progressPct(dl);
   const pctLabel = formatPct(pct);
   const fillPct = Math.min(100, pct);

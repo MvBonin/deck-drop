@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from functools import partial
 from pathlib import Path
 from urllib.parse import quote
 
@@ -82,6 +83,10 @@ class GameOut(BaseModel):
     content_hash: str = ""
     update_available: bool = False
     update_version_label: str = ""
+    # An update is running, but the host now offers something else (newer
+    # version, or it rebuilt the torrent and no longer seeds the running one).
+    update_restart_available: bool = False
+    update_restart_label: str = ""
     restore_available: bool = False
 
     @classmethod
@@ -121,6 +126,7 @@ class GameOut(BaseModel):
             update_version_label = best_update.get("version_label") or (
                 f"Rev. {best_update.get('revision', g.content.revision + 1)}"
             )
+        restart_available, restart_label = _update_restart_offer(s, g.id)
         # Phase 7: a game changed locally, but a peer still offers exactly the
         # same content we published before the change – "restore" is just an
         # update to our own version_key, reusing the same download path.
@@ -163,8 +169,34 @@ class GameOut(BaseModel):
             content_hash=g.content.content_hash,
             update_available=best_update is not None,
             update_version_label=update_version_label,
+            update_restart_available=restart_available,
+            update_restart_label=restart_label,
             restore_available=restore_available,
         )
+
+
+def _update_restart_offer(s: object, game_id: str) -> tuple[bool, str]:
+    """(available, label) for "Update neu starten": an update of this game is
+    running, and a peer offers a newer revision than its target, or nobody
+    seeds the running update's torrent any more (host re-hashed / rebuilt)."""
+    transfer = getattr(s, "transfer", None)
+    if transfer is None or not hasattr(transfer, "active_update_for"):
+        return False, ""
+    running = transfer.active_update_for(game_id)
+    if running is None:
+        return False, ""
+    offers = s.peer_registry.offers_for(game_id)  # type: ignore[attr-defined]
+    if not offers:
+        return False, ""
+    newer = [o for o in offers if int(o.get("revision") or 1) > running.target_revision]
+    if running.target_revision <= 0:
+        newer = []  # record from an older version: target revision unknown
+    seeded = any((o.get("info_hash") or "").lower() == running.info_hash for o in offers)
+    if not newer and seeded:
+        return False, ""
+    best = max(newer or offers, key=lambda o: int(o.get("revision") or 1))
+    label = best.get("version_label") or f"Rev. {best.get('revision', '?')}"
+    return True, label
 
 
 class AddGameRequest(BaseModel):
@@ -663,6 +695,8 @@ async def get_updates(game_id: str) -> dict:
 
 class UpdateRequest(BaseModel):
     version_key: str
+    # Optional source peer (repair dialog: "welche Version von wo").
+    peer_id: str | None = None
 
 
 @router.post(
@@ -692,9 +726,44 @@ async def update_game(game_id: str, req: UpdateRequest) -> DownloadOut:
             tracker.release_hash_hold(game_id)
 
 
+@router.post(
+    "/games/{game_id}/repair",
+    response_model=DownloadOut,
+    status_code=202,
+    dependencies=[Depends(local_only)],
+)
+async def repair_game(game_id: str, req: UpdateRequest) -> DownloadOut:
+    """Repair ("Reparieren"): fetch the chosen version's torrent from the chosen peer,
+    recheck every file against it (like "Recheck" in a BitTorrent client)
+    and download whatever is missing or broken."""
+    s = app_state.get()
+    if s.transfer is None:
+        raise HTTPException(503, "Transfer nicht verfügbar (libtorrent nicht installiert)")
+    g = s.library.get(game_id)
+    if not g:
+        raise HTTPException(404, "Spiel nicht gefunden")
+
+    tracker = s.get_content_tracker()
+    try:
+        return await _update_game(s, g, game_id, req, tracker, repair=True)
+    finally:
+        # cancel_hash() holds off new baseline hashes; by now start_update
+        # either marked the game "updating" (busy – no hash starts) or failed.
+        if hasattr(tracker, "release_hash_hold"):
+            tracker.release_hash_hold(game_id)
+
+
 async def _update_game(
-    s: object, g: object, game_id: str, req: UpdateRequest, tracker: object
+    s: object,
+    g: object,
+    game_id: str,
+    req: UpdateRequest,
+    tracker: object,
+    *,
+    repair: bool = False,
 ) -> DownloadOut:
+    from deckdrop.network.transfer import UpdateAlreadyRunning
+
     state = tracker.state(game_id)
     if state == "hashing":
         # Don't make the user wait for a baseline hash of the *old* version
@@ -704,8 +773,10 @@ async def _update_game(
         if not stopped:
             raise HTTPException(409, "Hash-Berechnung ließ sich nicht abbrechen")
         g = s.library.get(game_id) or g
-    elif state in ("publishing", "updating"):
+    elif state == "publishing":
         raise HTTPException(409, f"Spiel ist gerade beschäftigt ({state})")
+    # "updating" is fine: start_update replaces the running update (the host
+    # may have published a newer version or rebuilt the torrent meanwhile).
     # No scan here any more: the update's piece check does a fresh stat()
     # comparison itself (ContentTracker.stat_suspects) and reads suspicious
     # files anyway – hashing them here first only delayed the response.
@@ -713,6 +784,11 @@ async def _update_game(
     peers = s.peer_registry.peers_for_version(game_id, req.version_key)
     if not peers:
         raise HTTPException(404, f"Version {req.version_key} nicht gefunden oder kein Peer online")
+    if req.peer_id:
+        chosen = [p for p in peers if p.peer_id == req.peer_id]
+        if not chosen:
+            raise HTTPException(404, "Gewählter Peer bietet diese Version nicht (mehr) an")
+        peers = chosen + [p for p in peers if p.peer_id != req.peer_id]
 
     primary = peers[0]
     manifest = await asyncio.to_thread(_fetch_peer_manifest, primary.address, primary.port, game_id)
@@ -726,8 +802,18 @@ async def _update_game(
         # Returns right away: local prep + reading existing pieces run in the
         # background and show up in "Downloads" as phase "preparing".
         download_id = await asyncio.to_thread(
-            s.transfer.start_update, g, peers, torrent_bytes, manifest, background=True
+            partial(
+                s.transfer.start_update,
+                g,
+                peers,
+                torrent_bytes,
+                manifest,
+                background=True,
+                repair=repair,
+            )
         )
+    except UpdateAlreadyRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(500, f"Update konnte nicht gestartet werden: {exc}") from exc
 

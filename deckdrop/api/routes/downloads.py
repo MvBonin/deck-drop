@@ -126,6 +126,7 @@ class DownloadOut(BaseModel):
     stall_seconds: int = 0
     kind: str = "new"  # "new" | "update" (Phase 5)
     target_version_label: str = ""  # only set for kind == "update"
+    repair: bool = False  # update run as "Reparieren"
 
 
 def _to_out(status: object) -> DownloadOut:

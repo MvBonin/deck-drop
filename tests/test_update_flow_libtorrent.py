@@ -11,6 +11,7 @@ Slow (real I/O, real network loop) and skipped entirely without libtorrent.
 from __future__ import annotations
 
 import hashlib
+import os
 import socket
 import time
 from dataclasses import dataclass
@@ -56,8 +57,13 @@ def test_update_transfers_only_changed_pieces(tmp_path, monkeypatch, background)
     host_root = tmp_path / "host"
     host_game = host_root / "Big Game"
     host_game.mkdir(parents=True)
-    unchanged = b"A" * (6 * 1024 * 1024)
-    changed_v1 = b"B" * (3 * 1024 * 1024)
+    # A random salt makes this run's torrent (info hash) unique: both
+    # libtorrent tests used to build byte-identical games, so via LSD a
+    # receiver could also find another test's (or process's) seed and fetch
+    # endgame blocks twice – which blew the delta budget below at random.
+    salt = os.urandom(32)
+    unchanged = salt + b"A" * (6 * 1024 * 1024 - len(salt))
+    changed_v1 = salt + b"B" * (3 * 1024 * 1024 - len(salt))
     (host_game / "unchanged.bin").write_bytes(unchanged)
     (host_game / "changed.bin").write_bytes(changed_v1)
     (host_game / "removed.bin").write_bytes(b"C" * (1024 * 1024))
@@ -238,7 +244,11 @@ def test_update_transfers_only_changed_pieces(tmp_path, monkeypatch, background)
         assert reloaded.content.content_hash == host_info.content.content_hash
 
         # -- Delta proof: far less than the whole new game size was downloaded --
-        downloaded = status.total_payload_download
+        # Only bytes that were actually needed: libtorrent counts blocks it
+        # received twice (endgame) or that failed a hash check separately.
+        downloaded = (
+            status.total_payload_download - status.total_redundant_bytes - status.total_failed_bytes
+        )
         assert downloaded > 0
         assert downloaded < total_size_v2 * 0.5, (
             f"Update looks like a full re-download: {downloaded} bytes of {total_size_v2} total"

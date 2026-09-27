@@ -37,7 +37,7 @@ function CoverImage({ game, mode = 'own' }) {
 }
 
 export function GameCard({
-  game, mode = 'own', onAction, onEdit, onComments, onPublish, onUpdate, onRestore,
+  game, mode = 'own', onAction, onEdit, onComments, onPublish, onUpdate, onRestore, onRepair,
   disabled, prepProgress, updateProgress,
 }) {
   const unavailable = mode === 'own' && !game.available;
@@ -208,6 +208,16 @@ export function GameCard({
               aria-label="Kommentare anzeigen"
             >💬</button>
           `}
+          ${mode === 'own' && onRepair && html`
+            <button
+              class="btn btn-ghost"
+              style="padding:6px 10px;font-size:15px;min-width:36px"
+              onClick=${e => { e.stopPropagation(); onRepair(); }}
+              tabIndex=${-1}
+              title="Reparieren"
+              aria-label="Spiel reparieren"
+            >🔧</button>
+          `}
           ${mode === 'own' && onEdit && html`
             <button
               class="btn btn-ghost"
@@ -234,6 +244,15 @@ export function GameCard({
             onClick=${e => { e.stopPropagation(); onRestore(); }}
             tabIndex=${-1}
           >Änderungen verwerfen (aus Netzwerk wiederherstellen)</button>
+        `}
+        ${updating && game.update_restart_available && onUpdate && html`
+          <button
+            class="btn btn-secondary"
+            style="width:100%;margin-top:6px;font-size:13px"
+            onClick=${e => { e.stopPropagation(); onUpdate(); }}
+            tabIndex=${-1}
+            title="Der Host bietet inzwischen etwas anderes an – laufendes Update ersetzen"
+          >Update neu starten: ${game.update_restart_label || 'neue Version'}…</button>
         `}
         ${game.update_available && onUpdate && !updating && html`
           <button

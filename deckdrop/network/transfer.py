@@ -51,6 +51,7 @@ class DownloadStatus:
     # Phase 5: update downloads (see docs/plans/game-updates.md "5.1").
     kind: str = "new"  # "new" | "update"
     target_version_label: str = ""
+    repair: bool = False  # update run as "Reparieren": full recheck, no trust
 
 
 @dataclass
@@ -100,6 +101,18 @@ class _PersistedRecord:
     # Update still preparing (local prep + reading existing pieces) in the
     # background – no torrent in the session yet. Restarted after a restart.
     preparing: bool = False
+    target_revision: int = 0  # only set for kind == "update"
+    # Files of update targets this one replaced (host published a newer
+    # version or rebuilt the torrent mid-update): deleted at finalize unless
+    # the final version still has them.
+    stale_files: list[str] = field(default_factory=list)
+    # "Reparieren": same mechanics as an update, but nothing on disk is
+    # trusted – libtorrent rechecks every piece and fetches what differs.
+    repair: bool = False
+
+
+class UpdateAlreadyRunning(RuntimeError):
+    """start_update was asked for the very torrent an update already runs."""
 
 
 @dataclass
@@ -662,8 +675,13 @@ class TransferManager:
         download_id: str | None = None,
         *,
         background: bool = False,
+        repair: bool = False,
     ) -> str:
         """Start applying an update in place (docs/plans/game-updates.md "5.2").
+
+        `repair=True` ("Reparieren"): same flow for a chosen version, but
+        nothing on disk is trusted – no have_pieces fast path; libtorrent
+        rechecks every piece (force_recheck) and downloads what differs.
 
         Unlike `start_download`, this never touches a fresh destination
         folder: it prepares the *existing* game folder (moves/copies/
@@ -711,6 +729,17 @@ class TransferManager:
             if ti is None:
                 raise RuntimeError("update torrent has no usable metadata")
 
+            # An update of this game is already running (the host published
+            # a newer version or rebuilt the torrent meanwhile, so the old
+            # one may never finish): replace it. Files stay on disk; what it
+            # already fetched is found again by the piece check.
+            stale_files: list[str] = []
+            running = self.active_update_for(game.id)
+            if running is not None:
+                if running.info_hash and running.info_hash == info_hash and not repair:
+                    raise UpdateAlreadyRunning("Dieses Update läuft bereits.")
+                stale_files = self._replace_running_update(running, target_version_label)
+
             rec = _PersistedRecord(
                 download_id=download_id,
                 game_id=game.id,
@@ -728,6 +757,9 @@ class TransferManager:
                 local_game_path=str(game_path),
                 target_version_label=target_version_label,
                 preparing=True,
+                target_revision=int(content_block.get("revision") or 0),
+                stale_files=stale_files,
+                repair=repair,
             )
             if torrent_bytes:
                 self._resume_store.save_torrent(download_id, info_hash, torrent_bytes)
@@ -739,6 +771,8 @@ class TransferManager:
             self._save_state()
 
             self._begin_update_prep(rec, game, manifest, lt, ti, tracker, background=background)
+        except UpdateAlreadyRunning:
+            raise  # the running update stays as it is
         except Exception:
             self._discard_update_record(download_id)
             if tracker is not None:
@@ -754,6 +788,46 @@ class TransferManager:
             " (preparing in background)" if background else "",
         )
         return download_id
+
+    def active_update_for(self, game_id: str) -> _PersistedRecord | None:
+        """The in-place update currently registered for `game_id`, if any."""
+        for rec in self._paused.values():
+            if rec.kind == "update" and rec.game_id == game_id:
+                return rec
+        return None
+
+    def _replace_running_update(self, running: _PersistedRecord, new_label: str) -> list[str]:
+        """Drop a running update in favour of a new one (files stay on disk).
+
+        Returns the file list to remember as stale: every file of the
+        replaced target (and of targets it replaced itself), so files only
+        those versions added get deleted once the new update finalizes.
+        """
+        from deckdrop.core import debuglog
+
+        prev_target = self._resume_store.load_manifest(running.download_id) or {}
+        stale = list(
+            dict.fromkeys([*running.stale_files, *(prev_target.get("files") or {}).keys()])
+        )
+        self._discard_update_record(running.download_id)
+        self._resume_store.discard(running.download_id)
+        self._forget_download_timers(running.download_id)
+        self._completed_ids.discard(running.download_id)
+        self._user_paused.discard(running.download_id)
+        debuglog.record(
+            "update",
+            "update_replaced",
+            running.game_id,
+            detail=f"{running.target_version_label or '?'} → {new_label}",
+        )
+        log.info(
+            "Update %s of %s replaced (%s → %s)",
+            running.download_id,
+            running.game_id,
+            running.target_version_label,
+            new_label,
+        )
+        return stale
 
     def _discard_update_record(self, download_id: str) -> None:
         rec = self._paused.pop(download_id, None)
@@ -789,7 +863,12 @@ class TransferManager:
         new_files: dict[str, str] = dict(manifest.get("files") or {})
         new_sizes: dict[str, int] = dict(manifest.get("sizes") or {})
         new_ignore = list((manifest.get("content") or {}).get("ignore") or [])
-        if game.files:
+        if rec.repair:
+            # Trust nothing: every file on disk counts as "changed" (so a too
+            # long one is truncated); libtorrent's recheck decides the rest.
+            diff = content.diff_without_baseline(game_path, new_files, new_sizes)
+            reason = "repair"
+        elif game.files:
             diff = content.diff_manifests(game.files, game.sizes, new_files, new_sizes)
             reason = "update_reuse_local"
         else:
@@ -797,7 +876,22 @@ class TransferManager:
             # update): verify whatever is already on disk piece by piece.
             diff = content.diff_without_baseline(game_path, new_files, new_sizes)
             reason = "update_without_baseline"
+        # A "new" file that is already on disk (left by a replaced update, or
+        # copied in by hand) may hold reusable bytes: verify it piece by
+        # piece like a changed file – that also truncates it if too long.
+        for rel in list(diff.added):
+            path = content.safe_join(game_path, rel)
+            if path is not None and path.is_file():
+                diff.added.remove(rel)
+                diff.changed.append(rel)
         plan = content.plan_local_prep(game_path, diff, new_sizes, new_ignore)
+        for rel in rec.stale_files:
+            if (
+                rel not in new_files
+                and rel not in plan.deletes_after
+                and not content.is_ignored(rel, new_ignore)
+            ):
+                plan.deletes_after.append(rel)
 
         if tracker is not None:
             tracker.set_state(
@@ -826,6 +920,10 @@ class TransferManager:
                 params = lt.add_torrent_params()
                 params.ti = ti
                 params.save_path = str(game_path.parent)
+                if rec.repair:
+                    prep.params = params  # no have_pieces: full recheck after add
+                    prep.progress = 1.0
+                    return
                 self._apply_have_pieces_fast_path(
                     lt,
                     ti,
@@ -875,6 +973,15 @@ class TransferManager:
                 continue
             try:
                 handle = self._session.add_torrent(prep.params)
+                if rec.repair:
+                    # Like "Recheck" in a BitTorrent client: read every piece
+                    # on disk, then fetch only what is missing or broken.
+                    from deckdrop.core import debuglog
+
+                    debuglog.record(
+                        "recheck", "repair", rec.game_id, detail=rec.target_version_label
+                    )
+                    handle.force_recheck()
                 address = rec.peer_address or self._peer_address_for(rec)
                 if address:
                     handle.connect_peer((address, self._cfg.torrent_port))
@@ -1894,6 +2001,7 @@ class TransferManager:
             phase_progress=phase_progress,
             kind=rec.kind,
             target_version_label=rec.target_version_label,
+            repair=rec.repair,
         )
 
     def _build_status(self, h: _Handle) -> DownloadStatus:
@@ -1977,6 +2085,7 @@ class TransferManager:
                 stall_seconds=max(0, stall_seconds),
                 kind=rec.kind if rec else "new",
                 target_version_label=rec.target_version_label if rec else "",
+                repair=bool(rec and rec.repair),
             )
             if rec:
                 self._sync_rec_from_status(rec, out)
@@ -2009,6 +2118,7 @@ class TransferManager:
                 phase="error",
                 kind=rec.kind if rec else "new",
                 target_version_label=rec.target_version_label if rec else "",
+                repair=bool(rec and rec.repair),
             )
             return out
 
@@ -2060,6 +2170,7 @@ class TransferManager:
             "peer_name": status.peer_name,
             "kind": status.kind,
             "target_version_label": status.target_version_label,
+            "repair": status.repair,
             "progress": status.progress,
             "speed_bytes_sec": status.speed_bytes_sec,
             "downloaded_bytes": status.downloaded_bytes,
