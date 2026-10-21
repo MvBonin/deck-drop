@@ -56,6 +56,11 @@ export const api = {
   startUpdate:      (id, versionKey)  => post(`/api/games/${id}/update`, { version_key: versionKey }),
   repairGame:       (id, versionKey, peerId) =>
     post(`/api/games/${id}/repair`, { version_key: versionKey, peer_id: peerId }),
+  selfUpdate:         ()       => get('/api/selfupdate'),
+  checkSelfUpdate:    ()       => post('/api/selfupdate/check'),
+  installSelfUpdate:  (source) => post('/api/selfupdate/install', { source }),
+  restartSelfUpdate:  ()       => post('/api/selfupdate/restart'),
+  rollbackSelfUpdate: ()       => post('/api/selfupdate/rollback'),
   debug:            (gameId)          =>
     get('/api/debug' + (gameId ? `?game_id=${encodeURIComponent(gameId)}` : '')),
 };

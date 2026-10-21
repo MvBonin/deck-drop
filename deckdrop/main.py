@@ -79,6 +79,7 @@ def main() -> None:
 def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = False) -> None:
     import atexit
     import os
+    import sys
     import threading
     from contextlib import asynccontextmanager
 
@@ -222,7 +223,13 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
     app = create_app(lifespan=lifespan)
 
-    if not headless:
+    # After a self-update restart the old browser/kiosk window is still open
+    # and reloads itself – don't open a second one.
+    restarted = os.environ.pop("DECKDROP_RESTARTED", "") == "1"
+
+    if restarted:
+        pass
+    elif not headless:
         import threading
         import time
         import webbrowser
@@ -260,6 +267,13 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
     print(f"DeckDrop running at http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+    from deckdrop.core import selfupdate
+
+    if selfupdate.restart_requested():
+        remove_pid_file(cfg_mod.CONFIG_PATH)
+        print("DeckDrop startet neu…")
+        selfupdate.exec_restart(sys.argv)
 
 
 if __name__ == "__main__":

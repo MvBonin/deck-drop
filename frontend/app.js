@@ -47,6 +47,19 @@ function App() {
   const [debug, setDebugState]    = useState(isDebug());
   const toastTimer = useRef(null);
 
+  // Settings badge: newer DeckDrop on a LAN peer (checked locally, no
+  // internet) or found by the last manual GitHub check.
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => {
+    const poll = () => api.selfUpdate()
+      .then(s => setUpdateAvailable(Boolean((s.lan || []).length || s.github?.newer
+        || s.install?.state === 'ready')))
+      .catch(() => {});
+    poll();
+    const t = setInterval(poll, 60_000);
+    return () => clearInterval(t);
+  }, []);
+
   useEffect(() => onDebugChange((on) => {
     setDebugState(on);
     if (!on) setView(v => (v === 'debug' ? 'settings' : v));
@@ -139,7 +152,7 @@ function App() {
     <div id="app-inner">
       ${debug && html`<div class="debug-badge" title="Debug-Modus aktiv (?debug=0 zum Ausschalten)">DEBUG</div>`}
       ${views[view] ?? views.games}
-      <${Nav} view=${view} onNav=${setView} dlCount=${activeDlCount} debug=${debug} />
+      <${Nav} view=${view} onNav=${setView} dlCount=${activeDlCount} debug=${debug} updateAvailable=${updateAvailable} />
       <${Toast} message=${toast} />
     </div>`;
 }

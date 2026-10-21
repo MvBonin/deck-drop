@@ -34,6 +34,8 @@ class PeerEntry:
     last_seen: float = field(default_factory=time.monotonic)
     games: list[dict] = field(default_factory=list)
     online: bool = True
+    # Signed DeckDrop AppImage this peer offers for LAN self-updates (or None).
+    app_offer: dict | None = None
 
 
 def _norm_name(name: object) -> str:
@@ -200,6 +202,18 @@ class PeerRegistry:
             transfer.update_peer_address(peer_id, address)
             log.info("Peer %s address updated to %s for active downloads", peer_id[:8], address)
 
+    async def _fetch_app_offer(self, address: str, port: int) -> dict | None:
+        """Signed DeckDrop package the peer offers (LAN self-update); None if none."""
+        try:
+            async with httpx.AsyncClient(timeout=GAME_FETCH_TIMEOUT) as client:
+                r = await client.get(_peer_http_url(address, port, "/api/selfupdate/offer"))
+            if r.status_code != 200:
+                return None
+            data = r.json()
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
     async def _fetch_games(
         self,
         peer_id: str,
@@ -233,6 +247,7 @@ class PeerRegistry:
         if not entry:
             return
 
+        entry.app_offer = await self._fetch_app_offer(address, port)
         changed = self._games_changed(entry.games, games)
         entry.games = games
         entry.last_seen = time.monotonic()

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { isDebug, setDebug } from '../debug.js';
+import { AppUpdate } from './AppUpdate.js';
 
 export function Settings({ showToast }) {
   const [cfg, setCfg]         = useState(null);
@@ -181,6 +182,8 @@ export function Settings({ showToast }) {
         deaktiviert – Ports ${cfg.port} und ${cfg.torrent_port} werden ausschließlich für
         LAN-Peers (inkl. Tailscale) verwendet.
       </p>
+
+      <${AppUpdate} showToast=${showToast} />
 
       <p class="settings-section-title">Anwendung</p>
       ${svc && html`
