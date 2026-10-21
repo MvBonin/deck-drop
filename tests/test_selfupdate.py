@@ -387,3 +387,20 @@ def test_release_tool_manifest_sign_roundtrip(tmp_path, monkeypatch):
     assert manifest["files"][0]["sha256"] == hashlib.sha256(PAYLOAD).hexdigest()
     # A key not listed in PUBLIC_KEYS must not sign.
     assert rt.sign(str(out), key_hex=secrets.token_bytes(32).hex()) == 1
+
+
+def test_status_never_searches_the_home_directory(monkeypatch):
+    """GET /api/selfupdate runs on every page load – it must not rglob $HOME
+    (that took seconds on big homes and timed out the e2e tests in CI)."""
+    from pathlib import Path
+
+    def boom(*_a, **_k):
+        raise AssertionError("status() must not search the file system")
+
+    monkeypatch.setattr(Path, "rglob", boom)
+    monkeypatch.setattr(Path, "glob", boom)
+    monkeypatch.delenv("APPIMAGE")
+    monkeypatch.delenv("FLATPAK_ID", raising=False)
+    assert selfupdate.status(None)["install_type"] == "pipx"
+    monkeypatch.setenv("FLATPAK_ID", "com.deckdrop.DeckDrop")
+    assert selfupdate.status(None)["install_type"] == "flatpak"

@@ -119,12 +119,21 @@ def appimage_path() -> Path | None:
 
 
 def install_type() -> str:
-    try:
-        from deckdrop.core.service import detect_install_type
+    """How this process runs – from the environment only.
 
-        return detect_install_type()
-    except Exception:
-        return "pipx"
+    Deliberately not `service.detect_install_type()`: without $APPIMAGE that
+    searches the whole home directory for an AppImage (rglob), which took
+    seconds on big homes and stalled every GET /api/selfupdate.
+    """
+    import sys
+
+    if os.getenv("FLATPAK_ID"):
+        return "flatpak"
+    if os.getenv("APPIMAGE"):
+        return "appimage"
+    if getattr(sys, "frozen", False):
+        return "windows" if sys.platform == "win32" else "appimage"
+    return "pipx"
 
 
 def can_self_update() -> tuple[bool, str]:
