@@ -16,7 +16,7 @@ const TABS = [
   { id: 'settings',  label: 'Einstellungen',icon: _settingsIcon },
 ];
 
-export function Nav({ view, onNav, dlCount, debug }) {
+export function Nav({ view, onNav, dlCount, debug, updateAvailable }) {
   const tabs = debug ? [...TABS, DEBUG_TAB] : TABS;
   const handleKey = (e, id) => {
     if (e.key === 'ArrowRight') { e.preventDefault(); focusNext(e.currentTarget, 1); }
@@ -38,6 +38,9 @@ export function Nav({ view, onNav, dlCount, debug }) {
         >
           <${tab.icon} />
           ${tab.label}
+          ${tab.id === 'settings' && updateAvailable
+            ? html`<span class="nav-badge" aria-label="DeckDrop-Update verfügbar">↑</span>`
+            : null}
           ${tab.id === 'downloads' && dlCount > 0
             ? html`<span class="nav-badge" aria-label="${dlCount} aktive Downloads">${dlCount}</span>`
             : null}

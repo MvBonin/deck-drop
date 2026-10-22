@@ -202,3 +202,42 @@ def test_repair_dialog_offers_version_and_source(page: Page, live_server_url: st
     expect(dialog.get_by_text("1.0.5").first).to_be_visible(timeout=10_000)
     expect(dialog.get_by_label("Quelle")).to_have_value("pc")
     expect(dialog.get_by_role("button", name="Reparieren", exact=True)).to_be_enabled()
+
+
+def test_settings_update_check_and_lan_offer(page: Page, live_server_url: str) -> None:
+    base = {
+        "current": "2.0.0",
+        "install_type": "appimage",
+        "can_self_update": True,
+        "self_update_hint": "",
+        "github": None,
+        "lan": [{"peer_id": "pc", "peer_name": "MVB Desktop", "version": "2.1.0", "size": 1}],
+        "install": {"state": "idle"},
+        "rollback_available": False,
+        "signing_configured": True,
+    }
+    checked = {
+        **base,
+        "github": {
+            "ok": True,
+            "latest": "2.1.0",
+            "newer": True,
+            "verified": True,
+            "notes": "- Reparieren",
+            "published_at": "2026-10-21T10:00:00Z",
+            "html_url": "https://github.com/MvBonin/deck-drop/releases/tag/v2.1.0",
+            "error": None,
+        },
+    }
+    page.route("**/api/selfupdate", lambda route: route.fulfill(json=base))
+    page.route("**/api/selfupdate/check", lambda route: route.fulfill(json=checked))
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    page.locator("nav.nav").get_by_text("Einstellungen").click()
+
+    expect(page.get_by_text("Neuere Version 2.1.0 im Netzwerk gefunden")).to_be_visible(
+        timeout=10_000
+    )
+    expect(page.get_by_role("button", name="Von MVB Desktop aktualisieren")).to_be_visible()
+    page.get_by_role("button", name="Nach Updates suchen").click()
+    expect(page.get_by_text("Version 2.1.0 verfügbar")).to_be_visible()
+    expect(page.get_by_role("button", name="Jetzt aktualisieren")).to_be_visible()

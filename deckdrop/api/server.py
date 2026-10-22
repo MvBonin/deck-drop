@@ -20,6 +20,7 @@ from deckdrop.api.routes import (
     downloads,
     games,
     peers,
+    selfupdate,
     service,
     settings,
     shutdown,
@@ -87,6 +88,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
     app.include_router(status.router, prefix="/api")
     app.include_router(shutdown.router, prefix="/api")
     app.include_router(debug.router, prefix="/api")
+    app.include_router(selfupdate.router, prefix="/api")
     app.include_router(ws_router)
 
     frontend_dir = _find_frontend()
