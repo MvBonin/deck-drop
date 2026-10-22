@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from deckdrop import __version__
 from deckdrop.api.routes import (
     debug,
     downloads,
@@ -67,7 +68,7 @@ class _FrontendNoCacheMiddleware(BaseHTTPMiddleware):
 def create_app(lifespan: Any = None) -> FastAPI:
     app = FastAPI(
         title="DeckDrop",
-        version="2.0.0",
+        version=__version__,
         docs_url="/api/docs",
         lifespan=lifespan or _default_lifespan,
     )
