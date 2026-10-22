@@ -6,4 +6,4 @@ for the GitHub secret DECKDROP_SIGNING_KEY. While the list is empty, no
 update can be verified – DeckDrop then refuses to self-update at all.
 """
 
-PUBLIC_KEYS: list[str] = []
+PUBLIC_KEYS: list[str] = ["5a5139ebd6f3242f8f79d285db1f867048adb69a04bec9d1ee232a260e32133f"]
