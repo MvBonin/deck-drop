@@ -36,15 +36,16 @@ das Update von GitHub oder von einem anderen Gerät im LAN kommt.
 
 3. Der Workflow `.github/workflows/release.yml` prüft Tag ↔ Version, baut die AppImage,
    schreibt und signiert `release.json` und veröffentlicht das Release mit:
-   `DeckDrop-<version>-x86_64.AppImage`, `DeckDrop-x86_64.AppImage` (fester Name),
-   `release.json`, `release.json.sig`, `SHA256SUMS`.
+   `DeckDrop-<version>-x86_64.AppImage`, `DeckDrop-x86_64.AppImage` (fester Name für den
+   Download-Link in der README), `release.json`, `release.json.sig`, `SHA256SUMS`.
 
 Fehlt das Secret oder passt der Schlüssel nicht zu `PUBLIC_KEYS`, bricht der Workflow ab –
 es entsteht nie ein unsigniertes Release.
 
 ## In der App
 
-- *Einstellungen → DeckDrop-Version → Nach Updates suchen*: fragt GitHub (nur dann).
+- *Einstellungen → DeckDrop-Version → Nach Updates suchen*: fragt nach einer Warnung
+  GitHub an (nur dann).
 - Neuere, signierte Versionen auf anderen Geräten im LAN werden automatisch angezeigt
   („Neuere Version … im Netzwerk gefunden – bei …“) und lassen sich von dort installieren.
 - AppImage: „Jetzt aktualisieren“ ersetzt die Datei am selben Pfad (alte bleibt als

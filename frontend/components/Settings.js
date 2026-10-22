@@ -90,9 +90,7 @@ export function Settings({ showToast }) {
 
   return html`
     <div class="view">
-      <div class="view-header">
-        <div class="view-title">Einstellungen</div>
-      </div>
+      <${AppUpdate} title="Einstellungen" showToast=${showToast} />
 
       <p class="settings-section-title">Profil</p>
       <div class="settings-section">
@@ -182,8 +180,6 @@ export function Settings({ showToast }) {
         deaktiviert – Ports ${cfg.port} und ${cfg.torrent_port} werden ausschließlich für
         LAN-Peers (inkl. Tailscale) verwendet.
       </p>
-
-      <${AppUpdate} showToast=${showToast} />
 
       <p class="settings-section-title">Anwendung</p>
       ${svc && html`

@@ -238,6 +238,9 @@ def test_settings_update_check_and_lan_offer(page: Page, live_server_url: str) -
         timeout=10_000
     )
     expect(page.get_by_role("button", name="Von MVB Desktop aktualisieren")).to_be_visible()
+    prompts: list[str] = []
+    page.once("dialog", lambda d: (prompts.append(d.message), d.accept()))
     page.get_by_role("button", name="Nach Updates suchen").click()
     expect(page.get_by_text("Version 2.1.0 verfügbar")).to_be_visible()
+    assert "GitHub" in prompts[0]
     expect(page.get_by_role("button", name="Jetzt aktualisieren")).to_be_visible()

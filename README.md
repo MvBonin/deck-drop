@@ -43,6 +43,22 @@ No update is ever applied automatically – you always start it from the UI.
 
 ## Install
 
+### AppImage (empfohlen)
+
+Lädt die neueste Version herunter und macht sie gleich ausführbar:
+
+```bash
+mkdir -p ~/Applications && curl -fL -o ~/Applications/DeckDrop.AppImage \
+  https://github.com/MvBonin/deck-drop/releases/latest/download/DeckDrop-x86_64.AppImage \
+  && chmod +x ~/Applications/DeckDrop.AppImage
+~/Applications/DeckDrop.AppImage
+```
+
+Spätere Updates: *Einstellungen → Nach Updates suchen* – die AppImage ersetzt sich selbst
+(Signatur und Prüfsumme werden geprüft).
+
+### pipx
+
 ```bash
 pipx install git+https://github.com/mvbonin/deck-drop.git
 ```

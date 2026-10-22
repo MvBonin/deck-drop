@@ -30,11 +30,13 @@ async function waitForRestart(oldVersion) {
 }
 
 /**
- * "DeckDrop-Version" in Settings: GitHub is only asked when the user clicks
- * "Nach Updates suchen"; newer versions on LAN peers are listed automatically
- * (LAN only). Every source is verified against the signed release manifest.
+ * Settings header with the installed version and "Nach Updates suchen" on the
+ * right; offers/progress follow below. GitHub is only asked when the user
+ * clicks (after a warning); newer versions on LAN peers are listed
+ * automatically (LAN only). Every source is verified against the signed
+ * release manifest.
  */
-export function AppUpdate({ showToast }) {
+export function AppUpdate({ title, showToast }) {
   const [st, setSt] = useState(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -56,6 +58,7 @@ export function AppUpdate({ showToast }) {
   }, [st?.install?.state]);
 
   const check = async () => {
+    if (!confirm('Achtung: Dafür wird eine Anfrage an GitHub (api.github.com) gesendet. Fortfahren?')) return;
     setChecking(true);
     try {
       const s = await api.checkSelfUpdate();
@@ -95,26 +98,35 @@ export function AppUpdate({ showToast }) {
     waitForRestart(st?.current);
   };
 
-  if (!st) return null;
+  const header = (version) => html`
+    <div class="view-header">
+      <div class="view-title">${title}</div>
+      ${version}
+    </div>`;
+  if (!st) return header(null);
   const gh = st.github;
   const inst = st.install || { state: 'idle' };
   const installing = ['downloading', 'verifying'].includes(inst.state);
   const pct = Math.round((inst.progress || 0) * 100);
   const lan = st.lan || [];
+  const hasDetails = lan.length > 0 || (gh && gh.newer) || inst.state !== 'idle' || st.rollback_available;
 
   return html`
-    <p class="settings-section-title">DeckDrop-Version</p>
-    <div class="settings-section">
-      <div class="settings-row">
+    ${header(html`
+      <div class="app-version">
         <div>
-          <div class="settings-row-label">Installiert: ${st.current}</div>
-          <div class="settings-row-sub">GitHub wird nur auf Knopfdruck gefragt</div>
+          <div class="settings-row-label">DeckDrop ${st.current}</div>
+          <div class="settings-row-sub">Suche fragt GitHub an</div>
         </div>
         <button type="button" class="btn btn-secondary" style="padding:6px 12px;font-size:13px"
           onClick=${check} disabled=${checking || installing}>
           ${checking ? html`<span class="spinner"></span>` : 'Nach Updates suchen'}
         </button>
       </div>
+    `)}
+    ${hasDetails && html`
+    <p class="settings-section-title">DeckDrop-Version</p>
+    <div class="settings-section">
 
       ${lan.map(o => html`
         <div class="settings-row" key=${o.peer_id}>
@@ -187,7 +199,7 @@ export function AppUpdate({ showToast }) {
             onClick=${() => restart(true)} disabled=${restarting || installing}>Vorherige Version wiederherstellen</button>
         </div>
       `}
-    </div>
+    </div>`}
     ${restarting && html`
       <div class="overlay" role="dialog" aria-modal="true" aria-label="Neustart">
         <div class="dialog" style="text-align:center">
