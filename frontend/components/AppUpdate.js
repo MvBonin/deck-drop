@@ -56,6 +56,7 @@ export function AppUpdate({ showToast }) {
   }, [st?.install?.state]);
 
   const check = async () => {
+    if (!confirm('Achtung: Dafür wird eine Anfrage an GitHub (api.github.com) gesendet. Fortfahren?')) return;
     setChecking(true);
     try {
       const s = await api.checkSelfUpdate();
@@ -108,7 +109,7 @@ export function AppUpdate({ showToast }) {
       <div class="settings-row">
         <div>
           <div class="settings-row-label">Installiert: ${st.current}</div>
-          <div class="settings-row-sub">GitHub wird nur auf Knopfdruck gefragt</div>
+          <div class="settings-row-sub">Achtung: Die Suche fragt GitHub an – nur auf Knopfdruck</div>
         </div>
         <button type="button" class="btn btn-secondary" style="padding:6px 12px;font-size:13px"
           onClick=${check} disabled=${checking || installing}>

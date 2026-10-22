@@ -37,7 +37,6 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist-release
           cp "DeckDrop-${VERSION}-x86_64.AppImage" dist-release/
-          cp "DeckDrop-${VERSION}-x86_64.AppImage" dist-release/DeckDrop-x86_64.AppImage
           python packaging/release_tool.py manifest dist-release/release.json \
             "dist-release/DeckDrop-${VERSION}-x86_64.AppImage"
           python packaging/release_tool.py sign dist-release/release.json
