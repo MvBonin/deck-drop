@@ -173,14 +173,34 @@ class GameInfo:
         return d
 
 
+# Parsed deckdrop.toml per path, keyed by the file's stat. GET /api/games
+# reloads every game; re-parsing a manifest with tens of thousands of file
+# hashes each time made the answer take seconds while the disk was busy
+# hashing, and peers gave up on it.
+_toml_cache: dict[Path, tuple[tuple[int, int, int], dict[str, Any]]] = {}
+
+
+def _read_toml(toml_path: Path) -> dict[str, Any] | None:
+    try:
+        st = toml_path.stat()
+    except OSError:
+        return None
+    key = (st.st_mtime_ns, st.st_size, st.st_ino)
+    cached = _toml_cache.get(toml_path)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    with toml_path.open("rb") as f:
+        data = tomllib.load(f)
+    _toml_cache[toml_path] = (key, data)
+    return data
+
+
 def load_from_path(game_path: Path) -> GameInfo | None:
     """Load GameInfo from a folder that contains deckdrop.toml. Returns None if missing."""
     toml_path = game_path / TOML_FILENAME
-    if not toml_path.exists():
+    data = _read_toml(toml_path)
+    if data is None:
         return None
-
-    with toml_path.open("rb") as f:
-        data = tomllib.load(f)
 
     g = data.get("game", {})
     steam_data = data.get("steam", {})
@@ -257,8 +277,8 @@ def load_from_path(game_path: Path) -> GameInfo | None:
             peer_id=origin_data.get("peer_id", ""),
             peer_name=origin_data.get("peer_name", ""),
         ),
-        files=data.get("files", {}),
-        sizes=data.get("sizes", {}),
+        files=dict(data.get("files", {})),
+        sizes=dict(data.get("sizes", {})),
         content=content,
         history=history,
     )
@@ -298,6 +318,8 @@ def create_new(
 
 def save(game: GameInfo) -> None:
     game.path.mkdir(parents=True, exist_ok=True)
+    # Two saves within one mtime tick (coarse on exFAT) must not look unchanged.
+    _toml_cache.pop(game.toml_path, None)
     with game.toml_path.open("wb") as f:
         tomli_w.dump(game.to_dict(), f)
 

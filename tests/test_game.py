@@ -214,3 +214,32 @@ def test_apply_manifest_drops_path_traversal_entries(tmp_path):
     game_mod.apply_manifest(info, manifest, keep_local_meta=True)
     assert info.files == {"a.bin": "hash1"}
     assert info.sizes == {"a.bin": 5}
+
+
+def test_load_from_path_returns_independent_copies(tmp_path):
+    """Parsed manifests are cached; callers mutating one GameInfo must not leak."""
+    g = game_mod.create_new(tmp_path / "G", "G", "alice")
+    g.files = {"a.bin": "h1"}
+    g.sizes = {"a.bin": 1}
+    game_mod.save(g)
+
+    first = game_mod.load_from_path(g.path)
+    first.files["b.bin"] = "h2"
+    first.sizes["b.bin"] = 2
+    second = game_mod.load_from_path(g.path)
+    assert second.files == {"a.bin": "h1"}
+    assert second.sizes == {"a.bin": 1}
+
+
+def test_load_from_path_sees_save_without_mtime_change(tmp_path):
+    import os
+
+    g = game_mod.create_new(tmp_path / "G", "G", "alice")
+    game_mod.save(g)
+    st = g.toml_path.stat()
+    assert game_mod.load_from_path(g.path).torrent.magnet == ""
+
+    g.torrent.magnet = "magnet:?xt=urn:btih:abc"
+    game_mod.save(g)
+    os.utime(g.toml_path, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert game_mod.load_from_path(g.path).torrent.magnet == "magnet:?xt=urn:btih:abc"
