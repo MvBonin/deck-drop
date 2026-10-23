@@ -10,6 +10,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from deckdrop.core.hostenv import host_env
+
 log = logging.getLogger(__name__)
 
 _GRACE_SEC = 3.0
@@ -47,6 +49,7 @@ def pids_listening_on_port(port: int) -> list[int]:
             text=True,
             timeout=3,
             check=False,
+            env=host_env(),
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return []

@@ -470,7 +470,10 @@ def exec_restart(argv: list[str]) -> None:
     path = appimage_path()
     env = {**os.environ, "DECKDROP_RESTARTED": "1"}
     if path is not None and path.is_file():
-        os.execve(str(path), [str(path), *argv[1:]], env)
+        from deckdrop.core.hostenv import host_env
+
+        # The new AppImage brings its own libraries – don't pass ours on.
+        os.execve(str(path), [str(path), *argv[1:]], host_env({"DECKDROP_RESTARTED": "1"}))
     import sys
 
     os.execve(sys.executable, [sys.executable, "-m", "deckdrop.main", *argv[1:]], env)
