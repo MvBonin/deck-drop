@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Literal
 
+from deckdrop.core.hostenv import host_env
+
 InstallType = Literal["flatpak", "appimage", "pipx"]
 
 _SERVICE_NAME = "deckdrop"
@@ -85,6 +87,7 @@ def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
         ["systemctl", "--user", *args],
         capture_output=True,
         text=True,
+        env=host_env(),
     )
 
 
@@ -101,6 +104,7 @@ def _enable_linger() -> None:
             ["loginctl", "enable-linger", user],
             capture_output=True,
             text=True,
+            env=host_env(),
         )
     except OSError:
         pass

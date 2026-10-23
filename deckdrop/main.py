@@ -232,11 +232,12 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
     elif not headless:
         import threading
         import time
-        import webbrowser
+
+        from deckdrop.core.hostenv import open_url
 
         def _open_browser() -> None:
             time.sleep(1.2)
-            webbrowser.open(f"http://localhost:{port}")
+            open_url(f"http://localhost:{port}")
 
         threading.Thread(target=_open_browser, daemon=True).start()
     elif kiosk:
@@ -244,6 +245,8 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
         import subprocess
         import threading
         import time
+
+        from deckdrop.core.hostenv import host_env
 
         url = f"http://127.0.0.1:{port}"
 
@@ -258,6 +261,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
                             "--window-size=1280,800",
                             "--disable-features=TranslateUI",
                         ],
+                        env=host_env(),
                         start_new_session=True,
                     )
                     return

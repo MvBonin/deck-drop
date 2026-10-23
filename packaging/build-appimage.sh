@@ -101,7 +101,6 @@ cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
 export PATH="$HERE/usr/bin:$PATH"
-export LD_LIBRARY_PATH="$HERE/usr/bin:${LD_LIBRARY_PATH:-}"
 exec "$HERE/usr/bin/deckdrop" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
