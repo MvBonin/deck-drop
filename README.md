@@ -1,51 +1,45 @@
 # DeckDrop
 
-LAN-only game sharing for Steam Deck and Linux. Share your game library with friends on the same network – no internet, no accounts, no trackers.
+**Move your games between your Steam Deck, your PC and your friends' devices – over your own
+network, at LAN speed.**
 
-## Features
+Your PC already has that 80 GB game installed. Your Deck doesn't. Instead of downloading it again
+over a slow connection, DeckDrop copies it straight from the PC to the Deck on your home Wi-Fi or
+LAN. Same at a LAN party: one person has the game and the update, everyone else pulls it locally.
 
-- **Peer discovery** via mDNS – devices appear automatically on the same Wi-Fi
-- **P2P transfers** via libtorrent (LAN-optimised, DHT disabled)
-- **Controller navigation** – fully usable in Steam Deck Gaming Mode
-- **Dark UI** accessible from any browser on the network (`http://<device-ip>:7373`)
-- **Steam cover art** pulled automatically by App ID
-- **Integrity checking** via Blake2b hashes
-- No accounts, no internet required, no DRM
+> [!IMPORTANT]
+> **Only for legal copies.** DeckDrop is for moving games you are allowed to copy: your own
+> games between your own devices, DRM-free games whose license allows it, or games
+> your friends also own. It is **not** for piracy or for handing out games
+> people haven't bought. You are responsible for respecting each game's license and the store's
+> terms.
 
-## Updates
+> [!NOTE]
+> **LAN only.** DeckDrop works only between devices on the same local network. There is no
+> internet sharing, no public tracker, no DHT and no port forwarding. Game files never leave your
+> network.
 
-DeckDrop tracks the content of every shared game folder and notices when it changes on disk
-(a patch, a manual file edit, ...). A changed game is **locked from sharing** until you publish
-it as an update, so peers never receive half-patched or corrupted data:
+## What it does
 
-1. Patch/change a shared game normally (e.g. on your PC via Steam). DeckDrop's "Meine Spiele"
-   view shows a **"Verändert"** badge on the next scan (periodic, or right after you open the
-   view).
-2. Click **"Update veröffentlichen…"**, give the update an optional version label and note, and
-   confirm. DeckDrop hashes only what changed and re-shares the game.
-3. Other devices that already have this game (PC or Steam Deck) see an **"Update verfügbar"**
-   badge with the version label. Updating downloads only the pieces that actually differ –
-   unchanged files are never re-transferred – and keeps any local-only files (save games, config,
-   shader cache, ...) untouched.
-4. A first-time download instead shows every version currently shared on the network, so you can
-   pick a specific one (e.g. to match a friend's modded copy).
-5. If a game is falsely marked "Verändert" (e.g. after restoring a backup), the same update flow
-   with the game's own version acts as an in-place repair against the network's copy.
-6. On the Steam Deck, the Decky plugin's Quick-Access panel shows how many of your games have an
-   update available, without opening the DeckDrop UI.
-
-No update is ever applied automatically – you always start it from the UI.
-
-## Requirements
-
-- Python 3.11+
-- `libtorrent` Python bindings (optional – transfers disabled without it)
+- **Finds your devices automatically.** Open DeckDrop on two devices on the same network and
+  they see each other. There is nothing to set up and no account to create.
+- **Fast local transfers.** Games are sent peer-to-peer (BitTorrent protocol, LAN-only). If
+  several devices have the game, you download from all of them at once.
+- **Made for the Deck.** You can control everything with the controller in Gaming Mode. A
+  fullscreen kiosk mode and a Decky plugin are included.
+- **Covers included.** Cover art is loaded from Steam automatically.
+- **Updates without re-downloading.** When you patch a game on one device, the others only fetch
+  the parts that changed (see below).
+- **Safe copies.** Every transfer is hash-checked. Half-patched or broken games are never
+  shared.
+- **Works from any browser.** The UI also runs from any browser on your network:
+  `http://<device-ip>:7373`.
 
 ## Install
 
-### AppImage (empfohlen)
+### AppImage (recommended – Steam Deck and Linux)
 
-Lädt die neueste Version herunter und macht sie gleich ausführbar:
+In Desktop Mode, open a terminal (Konsole) and run:
 
 ```bash
 mkdir -p ~/Applications && curl -fL -o ~/Applications/DeckDrop.AppImage \
@@ -54,77 +48,106 @@ mkdir -p ~/Applications && curl -fL -o ~/Applications/DeckDrop.AppImage \
 ~/Applications/DeckDrop.AppImage
 ```
 
-Spätere Updates: *Einstellungen → Nach Updates suchen* – die AppImage ersetzt sich selbst
-(Signatur und Prüfsumme werden geprüft).
+DeckDrop starts and opens in your browser. Everything it needs is inside the AppImage
+(Python, libtorrent, the UI).
+
+**In Gaming Mode:** add `~/Applications/DeckDrop.AppImage` as a Non-Steam Game and set its launch
+options to `--kiosk`. It then opens as a fullscreen app.
+
+**Updating:** *Einstellungen → Nach Updates suchen*. The AppImage replaces itself after checking
+its signature and checksum. The UI is currently in German.
 
 ### pipx
 
 ```bash
 pipx install git+https://github.com/mvbonin/deck-drop.git
+deckdrop
 ```
 
-Or clone and install in development mode:
+## How to share a game
+
+1. Start DeckDrop on both devices, on the same Wi-Fi or LAN.
+2. On the device that has the game, open **Meine Spiele** → **Spiel hinzufügen** and pick its install folder.
+3. On the other device, open **Netzwerk**. The game shows up there. Click download.
+
+That's it. Both devices need to be online at the same time, since nothing is stored in a cloud.
+
+## Game updates
+
+DeckDrop notices when the files of a shared game change (a patch, a mod, a manual edit). It then
+**stops sharing that game** until you publish the change, so nobody ever gets a half-patched copy.
+
+1. Patch the game as usual (e.g. let Steam update it on your PC). On the next scan, **Meine
+   Spiele** shows a **"Verändert"** badge.
+2. Click **"Update veröffentlichen…"**, optionally add a version label and a note, and confirm.
+   DeckDrop only re-hashes what changed.
+3. Devices that already have the game see **"Update verfügbar"**. Updating downloads only the
+   pieces that actually differ. Your saves, config and shader cache stay untouched.
+4. Downloading a game for the first time lists every version shared on the network. You can pick
+   one, e.g. to match a friend's modded copy.
+5. A game wrongly marked "Verändert" (e.g. after restoring a backup) can be repaired in place
+   with the same flow, using the network's copy.
+6. On the Steam Deck, the Decky plugin's Quick Access panel shows how many games have an update
+   waiting.
+
+Nothing is ever updated automatically. You always start it yourself.
+
+## Network and privacy
+
+- **Game data stays on your LAN.** Devices find each other via mDNS and transfer via libtorrent
+  with DHT, UPnP and NAT-PMP switched off. There is no tracker and nothing to forward on your
+  router.
+- **The only internet requests** are cover art and the Steam store lookup (by game name), plus the
+  update check, which only runs when you start it.
+- **No login.** Anyone on your network can open the UI, the same trust model as a shared
+  network folder. Only run it on networks you trust, not on public Wi-Fi.
+
+Default ports: UI/API `7373`, transfers `7374`. Config: `~/.config/deckdrop/config.toml`, also
+editable in the settings view.
+
+## Command line
+
+```bash
+deckdrop               # start and open the UI in your browser
+deckdrop --kiosk       # fullscreen app window (Gaming Mode, needs Chromium)
+deckdrop --headless    # server only, no browser
+deckdrop --port 8080   # different port
+```
+
+## For developers
 
 ```bash
 git clone https://github.com/mvbonin/deck-drop.git
 cd deck-drop
 pip install -e ".[dev]"
-```
-
-## Usage
-
-```bash
-deckdrop          # start server, open http://localhost:7373
-deckdrop --port 8080 --open   # custom port + auto-open browser
-```
-
-On Steam Deck: install the `.desktop` shortcut via `packaging/install.sh` to launch from Gaming Mode.
-
-### AppImage (alles in einer Datei)
-
-```bash
-bash packaging/build-appimage.sh
-chmod +x DeckDrop-*-x86_64.AppImage
-./DeckDrop-*-x86_64.AppImage          # Server + Browser
-./DeckDrop-*-x86_64.AppImage --kiosk  # Gaming Mode (Chromium Vollbild)
-```
-
-Enthält Python 3.12, alle Abhängigkeiten und libtorrent. Auf dem Steam Deck als Non-Steam-Spiel hinzufügen.
-
-## Development
-
-```bash
-pip install -e ".[dev]"
-pytest            # run tests
+pytest            # tests
 ruff check .      # lint
 ruff format .     # format
 ```
 
-## Project layout
+Build the AppImage yourself:
+
+```bash
+bash packaging/build-appimage.sh
+./DeckDrop-*-x86_64.AppImage
+```
+
+Project layout:
 
 ```
 deckdrop/
   core/         config, game metadata, hashing, torrent generation
   network/      mDNS discovery, peer registry, libtorrent transfers
   api/          FastAPI server + REST routes + WebSocket
-frontend/       Preact UI (no build step – CDN imports)
+frontend/       Preact UI (no build step, vendored dependencies)
+decky-plugin/   Decky Loader plugin for Gaming Mode
 tests/          pytest test suite
-packaging/      systemd service, AppImage builder, .desktop files
+packaging/      AppImage builder, systemd service, .desktop files
 ```
 
-## Configuration
-
-Config lives at `~/.config/deckdrop/config.toml` and is editable via the Settings view in the UI.
-
-Default ports: API `7373`, torrent `7374`.
-
-## Security model
-
-- LAN only – no port forwarding needed
-- No authentication (trust your local network, like Samba)
-- File integrity verified via libtorrent piece hashes + optional Blake2b check
-- No external tracker, no DHT, no internet traffic
+Releases: see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## License
 
-MIT
+MIT. DeckDrop's license covers this software only. It does not give you any rights to the games
+you share with it.
