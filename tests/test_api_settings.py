@@ -47,7 +47,7 @@ def test_status_endpoint(client):
     data = r.json()
     assert data["name"] == "alice"
     assert data["peer_id"]
-    assert data["version"] == "1.0.1"
+    assert data["version"] == "1.0.2"
     assert data["onboarding_complete"] is False
 
 
