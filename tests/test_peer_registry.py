@@ -286,3 +286,18 @@ async def test_sync_from_peer_fills_empty_version_label(tmp_path, monkeypatch, r
     assert reloaded.content.version_label == "1.0.5"
     assert reloaded.content.note == "Patch"
     assert reloaded.content.revision == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_failure_keeps_last_known_games(registry):
+    """A host busy hashing may answer too slowly – its games must not vanish."""
+    with respx.mock:
+        route = respx.get("http://192.168.1.10:7373/api/games")
+        route.mock(return_value=httpx.Response(200, json=[{"id": "g1", "name": "Portal 2"}]))
+        await registry.upsert("p1", "Bob", "192.168.1.10", 7373)
+
+        route.mock(side_effect=httpx.ReadTimeout("timeout"))
+        await registry.refresh_all_online()
+
+    assert [g["name"] for g in registry.get_games("p1")] == ["Portal 2"]
+    assert len(registry.all_network_games()) == 1
