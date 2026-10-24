@@ -1,6 +1,7 @@
 import { html } from 'htm/preact';
 import { useState } from 'preact/hooks';
 import { fmtBytes } from '../api.js';
+import { t } from '../i18n/index.js';
 
 const PLACEHOLDER_STYLE = 'display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:52px;font-weight:800;color:var(--accent);pointer-events:none';
 
@@ -100,27 +101,27 @@ export function GameCard({
             ${versionLabel}
             ${mode === 'own' && game.update_available && !updating && html`
               <span class="badge badge-success" style="margin-left:6px">
-                Update verfügbar: ${game.update_version_label || 'verfügbar'}
+                ${t('card.updateAvailable', { version: game.update_version_label || t('card.available') })}
               </span>
             `}
           </div>
         `}
         ${mode === 'network' && versionCount > 1 && html`
-          <div class="card-version"><span class="badge">${versionCount} Versionen</span></div>
+          <div class="card-version"><span class="badge">${t('card.versions', { count: versionCount })}</span></div>
         `}
         <div class="card-meta">
           ${size}
           ${mode === 'network' && game.peer_count != null && html`
-            · <span>${game.peer_count} Peer${game.peer_count !== 1 ? 's' : ''}</span>
+            · <span>${t('card.peers', { count: game.peer_count })}</span>
           `}
           ${mode === 'network' && game.peer_count > 1 && game.peer_name && html`
             · <span>${game.peer_name}</span>
           `}
           ${mode === 'own' && game.source_peer_name && html`
-            · <span>von ${game.source_peer_name}</span>
+            · <span>${t('card.from', { peer: game.source_peer_name })}</span>
           `}
           ${game.created_by && html`
-            · <span>Erstellt von ${game.created_by}</span>
+            · <span>${t('card.createdBy', { name: game.created_by })}</span>
           `}
           ${protondbUrl && html`
             · <a
@@ -138,46 +139,46 @@ export function GameCard({
         `}
         ${hostPreparing && html`
           <div class="card-prep">
-            <div class="card-prep-label">Game-Hashes berechnen…</div>
+            <div class="card-prep-label">${t('card.hashing')}</div>
           </div>
         `}
         ${ownPreparing && html`
           <div class="card-prep">
-            <div class="card-prep-label">Game-Hashes berechnen… ${prepPct}%</div>
+            <div class="card-prep-label">${t('card.hashingPct', { pct: prepPct })}</div>
             <div class="progress-bar" role="progressbar" aria-valuenow=${prepPct} aria-valuemin="0" aria-valuemax="100">
               <div class="progress-fill" style="width:${prepPct}%"></div>
             </div>
           </div>
         `}
         ${prepFailed && html`
-          <span class="unavailable-chip" style="margin-bottom:6px">Vorbereitung fehlgeschlagen</span>
+          <span class="unavailable-chip" style="margin-bottom:6px">${t('card.prepFailed')}</span>
         `}
         ${modified && !updating && html`
           <div class="card-modified-hint">
-            <span class="badge badge-warn">Verändert</span>
-            <span>Wird nicht geteilt</span>
+            <span class="badge badge-warn">${t('card.modified')}</span>
+            <span>${t('card.notShared')}</span>
           </div>
         `}
         ${unverified && html`
           <div class="card-modified-hint">
-            <span class="badge">Noch nicht geprüft</span>
-            <span>Wird nicht geteilt</span>
+            <span class="badge">${t('card.unverified')}</span>
+            <span>${t('card.notShared')}</span>
           </div>
         `}
         ${updating && html`
           <div class="card-prep">
             <div class="card-prep-label">${updatePreparing
-              ? `Wird aktualisiert… prüfe vorhandene Dateien ${updatePct}%`
-              : `Wird aktualisiert… ${updatePct}%`}</div>
+              ? t('card.updatingCheck', { pct: updatePct })
+              : t('card.updating', { pct: updatePct })}</div>
             <div class="progress-bar" role="progressbar" aria-valuenow=${updatePct} aria-valuemin="0" aria-valuemax="100">
               <div class="progress-fill" style="width:${updatePct}%"></div>
             </div>
-            <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Spiel nicht starten</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${t('card.dontLaunch')}</div>
           </div>
         `}
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           ${unavailable
-            ? html`<span class="unavailable-chip">Nicht verfügbar</span>`
+            ? html`<span class="unavailable-chip">${t('card.unavailable')}</span>`
             : html`<button
                 class=${'btn ' + (mode === 'own' || installedNoUpdate ? 'btn-secondary' : 'btn-primary')}
                 style=${(mode === 'own' || mode === 'network') && (onEdit || onComments) ? 'flex:1' : ''}
@@ -186,16 +187,16 @@ export function GameCard({
                 tabIndex=${-1}
               >
                 ${hostPreparing
-                  ? '⏳ Bitte warten…'
+                  ? t('card.pleaseWait')
                   : ownPreparing
-                    ? '⏳ Hashes…'
+                    ? t('card.hashes')
                     : mode === 'own'
-                      ? '✓ Geteilt'
+                      ? t('card.shared')
                       : installedWithUpdate
-                        ? '⟳ Update'
+                        ? t('card.update')
                         : installedNoUpdate
-                          ? '✓ Installiert'
-                          : '↓ Laden'}
+                          ? t('card.installed')
+                          : t('card.download')}
               </button>`
           }
           ${(mode === 'own' || mode === 'network') && onComments && html`
@@ -204,8 +205,8 @@ export function GameCard({
               style="padding:6px 10px;font-size:15px;min-width:36px"
               onClick=${e => { e.stopPropagation(); onComments(); }}
               tabIndex=${-1}
-              title="Kommentare"
-              aria-label="Kommentare anzeigen"
+              title=${t('card.comments')}
+              aria-label=${t('card.showComments')}
             >💬</button>
           `}
           ${mode === 'own' && onRepair && html`
@@ -214,8 +215,8 @@ export function GameCard({
               style="padding:6px 10px;font-size:15px;min-width:36px"
               onClick=${e => { e.stopPropagation(); onRepair(); }}
               tabIndex=${-1}
-              title="Reparieren"
-              aria-label="Spiel reparieren"
+              title=${t('card.repair')}
+              aria-label=${t('card.repairGame')}
             >🔧</button>
           `}
           ${mode === 'own' && onEdit && html`
@@ -224,8 +225,8 @@ export function GameCard({
               style="padding:6px 10px;font-size:15px;min-width:36px"
               onClick=${onEdit}
               tabIndex=${-1}
-              title="Bearbeiten"
-              aria-label="Spiel bearbeiten"
+              title=${t('card.edit')}
+              aria-label=${t('card.editGame')}
             >✎</button>
           `}
         </div>
@@ -235,7 +236,7 @@ export function GameCard({
             style="width:100%;margin-top:6px;font-size:13px"
             onClick=${e => { e.stopPropagation(); onPublish(); }}
             tabIndex=${-1}
-          >Update veröffentlichen…</button>
+          >${t('card.publish')}</button>
         `}
         ${game.restore_available && onRestore && !updating && html`
           <button
@@ -243,7 +244,7 @@ export function GameCard({
             style="width:100%;margin-top:6px;font-size:13px"
             onClick=${e => { e.stopPropagation(); onRestore(); }}
             tabIndex=${-1}
-          >Änderungen verwerfen (aus Netzwerk wiederherstellen)</button>
+          >${t('card.discard')}</button>
         `}
         ${updating && game.update_restart_available && onUpdate && html`
           <button
@@ -251,8 +252,8 @@ export function GameCard({
             style="width:100%;margin-top:6px;font-size:13px"
             onClick=${e => { e.stopPropagation(); onUpdate(); }}
             tabIndex=${-1}
-            title="Der Host bietet inzwischen etwas anderes an – laufendes Update ersetzen"
-          >Update neu starten: ${game.update_restart_label || 'neue Version'}…</button>
+            title=${t('card.restartUpdateTitle')}
+          >${t('card.restartUpdate', { version: game.update_restart_label || t('card.newVersion') })}</button>
         `}
         ${game.update_available && onUpdate && !updating && html`
           <button
@@ -260,7 +261,7 @@ export function GameCard({
             style="width:100%;margin-top:6px;font-size:13px"
             onClick=${e => { e.stopPropagation(); onUpdate(); }}
             tabIndex=${-1}
-          >Aktualisieren…</button>
+          >${t('card.updateButton')}</button>
         `}
       </div>
     </div>`;

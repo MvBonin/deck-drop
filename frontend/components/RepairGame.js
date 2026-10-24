@@ -3,6 +3,7 @@ import { useState, useEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { VersionList } from './VersionList.js';
+import { t } from '../i18n/index.js';
 
 /**
  * "Reparieren": pick a version and the peer to take it from. DeckDrop then
@@ -70,13 +71,12 @@ export function RepairGame({ game, onClose, onStarted }) {
       onClick=${e => e.target === e.currentTarget && onClose()}
       role="dialog"
       aria-modal="true"
-      aria-label="Spiel reparieren"
+      aria-label=${t('repair.dialog')}
     >
       <div class="dialog">
-        <div class="dialog-title">Reparieren – ${game.name}</div>
+        <div class="dialog-title">${t('repair.titleFor', { name: game.name })}</div>
         <p class="dialog-text" style="margin-top:0">
-          Alle Dateien werden gegen die gewählte Version geprüft (Recheck).
-          Was fehlt oder abweicht, wird neu geladen.
+          ${t('repair.text')}
         </p>
 
         ${loading
@@ -84,17 +84,17 @@ export function RepairGame({ game, onClose, onStarted }) {
           : loadError
             ? html`<p style="color:var(--danger);font-size:13px">${loadError}</p>`
             : versions.length === 0
-              ? html`<p class="dialog-text">Keine Version dieses Spiels im Netzwerk gefunden.</p>`
+              ? html`<p class="dialog-text">${t('repair.noVersion')}</p>`
               : html`
                 <${VersionList} versions=${versions} value=${versionKey} onChange=${setVersionKey} />
                 <label style="display:block;margin-top:12px;font-size:13px;color:var(--text-dim)">
-                  Quelle
+                  ${t('repair.source')}
                   <select
                     class="form-input"
                     style="margin-top:4px"
                     value=${peerId}
                     onChange=${e => setPeerId(e.target.value)}
-                    aria-label="Quelle"
+                    aria-label=${t('repair.source')}
                   >
                     ${peers.map(p => html`<option key=${p.peer_id} value=${p.peer_id}>${p.peer_name}</option>`)}
                   </select>
@@ -105,13 +105,13 @@ export function RepairGame({ game, onClose, onStarted }) {
         ${error && html`<p style="color:var(--danger);font-size:13px;margin-top:10px">${error}</p>`}
 
         <div class="dialog-actions">
-          <button type="button" class="btn btn-ghost" onClick=${onClose} disabled=${submitting}>Abbrechen</button>
+          <button type="button" class="btn btn-ghost" onClick=${onClose} disabled=${submitting}>${t('common.cancel')}</button>
           <button
             type="button"
             class="btn btn-primary"
             disabled=${submitting || loading || !versionKey}
             onClick=${submit}
-          >${submitting ? html`<span class="spinner"></span>` : 'Reparieren'}</button>
+          >${submitting ? html`<span class="spinner"></span>` : t('repair.submit')}</button>
         </div>
       </div>
     </div>`;

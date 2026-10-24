@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { PublishUpdate } from './PublishUpdate.js';
+import { t } from '../i18n/index.js';
 
 export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
   const [showPublish, setShowPublish] = useState(false);
@@ -36,10 +37,10 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
         const updated = await api.getGame(game.id);
         onGameUpdated?.(updated);
       } else {
-        setError('App-ID gefunden, aber kein Steam-Cover verfügbar');
+        setError(t('game.noSteamCover'));
       }
     } catch (err) {
-      setError('Keine Cover Art auf Steam gefunden');
+      setError(t('game.noCoverArt'));
     } finally {
       setSearching(false);
     }
@@ -70,18 +71,18 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
   };
 
   return html`
-    <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="Spiel bearbeiten">
+    <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label=${t('game.edit')}>
       <div class="dialog">
-        <div class="dialog-title">Spiel bearbeiten</div>
+        <div class="dialog-title">${t('game.edit')}</div>
 
         <form onSubmit=${submit} style="display:flex;flex-direction:column;gap:14px">
           <div class="form-group">
-            <label class="form-label">Spielname *</label>
+            <label class="form-label">${t('game.name')}</label>
             <input
               ref=${firstRef}
               class="form-input"
               type="text"
-              placeholder="Spielname"
+              placeholder=${t('game.namePlaceholder')}
               value=${name}
               onInput=${e => setName(e.target.value)}
               disabled=${loading}
@@ -90,16 +91,16 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
           </div>
 
           <div class="form-group">
-            <label class="form-label">Plattform</label>
+            <label class="form-label">${t('game.platform')}</label>
             <select class="form-select" value=${platform} onChange=${e => setPlatform(e.target.value)} disabled=${loading}>
               <option value="linux">Linux</option>
               <option value="windows">Windows</option>
-              <option value="any">Beliebig</option>
+              <option value="any">${t('game.platformAny')}</option>
             </select>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Steam App-ID (optional, für Cover)</label>
+            <label class="form-label">${t('game.steamAppId')}</label>
             <input
               class="form-input"
               type="text"
@@ -116,22 +117,20 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
               style="align-self:flex-start;padding:8px 14px;font-size:13px"
               onClick=${searchCover}
               disabled=${loading || searching}
-              title="Spielname auf Steam durchsuchen und erste Treffer-App-ID übernehmen"
+              title=${t('game.searchSteamTitle')}
             >
-              ${searching ? html`<span class="spinner"></span>` : '🔍 Auf Steam suchen'}
+              ${searching ? html`<span class="spinner"></span>` : t('game.searchSteam')}
             </button>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45">
-              „Suchen“ oder Speichern mit App-ID lädt das Cover von Steam als
-              <code>deckdrop.jpg</code> in den Spielordner (ohne Torrent neu zu bauen).
-            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45"
+              dangerouslySetInnerHTML=${{ __html: t('game.coverNote') }}></div>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Beschreibung (optional)</label>
+            <label class="form-label">${t('game.description')}</label>
             <textarea
               class="form-input"
               rows="3"
-              placeholder="Kurze Beschreibung des Spiels…"
+              placeholder=${t('game.descriptionPlaceholder')}
               value=${description}
               onInput=${e => setDesc(e.target.value)}
               disabled=${loading}
@@ -140,11 +139,11 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
           </div>
 
           <div class="form-group">
-            <label class="form-label">Launch-Exe (optional, für Steam-Shortcut)</label>
+            <label class="form-label">${t('game.launchExe')}</label>
             <input
               class="form-input"
               type="text"
-              placeholder="/pfad/zum/spiel.exe"
+              placeholder=${t('game.launchExePlaceholder')}
               value=${launchExe}
               onInput=${e => setLaunchExe(e.target.value)}
               disabled=${loading}
@@ -152,7 +151,7 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
           </div>
 
           <div class="form-group">
-            <label class="form-label">Launch-Argumente (optional)</label>
+            <label class="form-label">${t('game.launchArgs')}</label>
             <input
               class="form-input"
               type="text"
@@ -164,7 +163,7 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
           </div>
 
           <div class="form-group">
-            <label class="form-label">Proton / Runner (optional)</label>
+            <label class="form-label">${t('game.runner')}</label>
             <input
               class="form-input"
               type="text"
@@ -176,26 +175,25 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
           </div>
 
           <div class="form-group">
-            <label class="form-label">Inhalt</label>
+            <label class="form-label">${t('game.content')}</label>
             <button
               type="button"
               class="btn btn-ghost"
               style="align-self:flex-start"
               onClick=${() => setShowPublish(true)}
               disabled=${loading}
-            >Update veröffentlichen…</button>
+            >${t('game.publish')}</button>
             <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45">
-              Auch nützlich, um nur neue Dateien (z. B. DLC-Ordner) mit aufzunehmen, ohne dass
-              sich sonst etwas geändert hat.
+              ${t('game.publishNote')}
             </div>
           </div>
 
           ${error && html`<p style="color:var(--danger);font-size:13px">${error}</p>`}
 
           <div class="dialog-actions">
-            <button type="button" class="btn btn-ghost" onClick=${onClose}>Abbrechen</button>
+            <button type="button" class="btn btn-ghost" onClick=${onClose}>${t('common.cancel')}</button>
             <button type="submit" class="btn btn-primary" disabled=${!name.trim() || loading}>
-              ${loading ? html`<span class="spinner"></span>` : 'Speichern'}
+              ${loading ? html`<span class="spinner"></span>` : t('common.save')}
             </button>
           </div>
         </form>

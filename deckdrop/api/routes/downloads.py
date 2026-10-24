@@ -71,7 +71,7 @@ def _fetch_magnet_from_peer(address: str, port: int, game_id: str) -> str:
         try:
             r = httpx.get(url, timeout=_MAGNET_REQUEST_TIMEOUT)
             if r.status_code == 409:
-                last_detail = r.text or "Torrent wird vorbereitet"
+                last_detail = r.text or t("err.torrent_preparing")
                 time.sleep(_MAGNET_PREP_POLL)
                 continue
             r.raise_for_status()

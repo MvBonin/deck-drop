@@ -2,6 +2,7 @@ import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
+import { t } from '../i18n/index.js';
 
 export function AddGame({ onClose, onAdded }) {
   const [path, setPath]           = useState('');
@@ -39,7 +40,7 @@ export function AddGame({ onClose, onAdded }) {
       onAdded(game);
     } catch (err) {
       if (err.status === 422 && !needsWizard) {
-        // Kein deckdrop.toml → Wizard anzeigen
+        // No deckdrop.toml → show the wizard
         setNeeds(true);
         setError('');
       } else {
@@ -53,18 +54,18 @@ export function AddGame({ onClose, onAdded }) {
   const canSubmit = path.trim() && (!needsWizard || name.trim()) && !loading;
 
   return html`
-    <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="Spiel hinzufügen">
+    <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label=${t('game.add')}>
       <div class="dialog">
-        <div class="dialog-title">${needsWizard ? 'Spiel einrichten' : 'Spiel hinzufügen'}</div>
+        <div class="dialog-title">${needsWizard ? t('game.setup') : t('game.add')}</div>
 
         <form onSubmit=${submit} style="display:flex;flex-direction:column;gap:14px">
           <div class="form-group">
-            <label class="form-label">Spielordner-Pfad</label>
+            <label class="form-label">${t('game.folderPath')}</label>
             <input
               ref=${firstRef}
               class="form-input"
               type="text"
-              placeholder="/home/user/Games/MeinSpiel"
+              placeholder=${t('game.folderPlaceholder')}
               value=${path}
               onInput=${e => { setPath(e.target.value); setNeeds(false); setError(''); }}
               disabled=${loading}
@@ -72,11 +73,10 @@ export function AddGame({ onClose, onAdded }) {
           </div>
 
           ${needsWizard && html`
-            <p style="font-size:13px;color:var(--text-dim)">
-              Kein <code>deckdrop.toml</code> gefunden. Bitte ergänze die Spielinfos:
-            </p>
+            <p style="font-size:13px;color:var(--text-dim)"
+              dangerouslySetInnerHTML=${{ __html: t('game.noToml') }}></p>
             <div class="form-group">
-              <label class="form-label">Spielname *</label>
+              <label class="form-label">${t('game.name')}</label>
               <input
                 class="form-input"
                 type="text"
@@ -87,15 +87,15 @@ export function AddGame({ onClose, onAdded }) {
               />
             </div>
             <div class="form-group">
-              <label class="form-label">Plattform</label>
+              <label class="form-label">${t('game.platform')}</label>
               <select class="form-select" value=${platform} onChange=${e => setPlatform(e.target.value)}>
                 <option value="linux">Linux</option>
                 <option value="windows">Windows</option>
-                <option value="any">Beliebig</option>
+                <option value="any">${t('game.platformAny')}</option>
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Steam App-ID (optional, für Cover)</label>
+              <label class="form-label">${t('game.steamAppId')}</label>
               <input
                 class="form-input"
                 type="number"
@@ -109,9 +109,9 @@ export function AddGame({ onClose, onAdded }) {
           ${error && html`<p style="color:var(--danger);font-size:13px">${error}</p>`}
 
           <div class="dialog-actions">
-            <button type="button" class="btn btn-ghost" onClick=${onClose}>Abbrechen</button>
+            <button type="button" class="btn btn-ghost" onClick=${onClose}>${t('common.cancel')}</button>
             <button type="submit" class="btn btn-primary" disabled=${!canSubmit}>
-              ${loading ? html`<span class="spinner"></span>` : (needsWizard ? 'Einrichten' : 'Hinzufügen')}
+              ${loading ? html`<span class="spinner"></span>` : (needsWizard ? t('game.setupButton') : t('game.addButton'))}
             </button>
           </div>
         </form>

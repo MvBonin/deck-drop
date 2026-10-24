@@ -140,7 +140,7 @@ def install_type() -> str:
 def can_self_update() -> tuple[bool, str]:
     path = appimage_path()
     if path is None or not path.is_file():
-        return False, "Nur die AppImage kann sich selbst aktualisieren."
+        return False, t("update.appimage_only")
     if not os.access(path.parent, os.W_OK) or not os.access(path, os.W_OK):
         return False, t("update.no_write_access", path=path)
     return True, ""

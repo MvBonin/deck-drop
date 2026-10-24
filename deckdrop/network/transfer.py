@@ -1946,7 +1946,7 @@ class TransferManager:
         self._pump_alerts()
         if self._pending_resume:
             log.warning(
-                "Resume-Daten für %d Download(s) nicht gespeichert (Zeitbudget %.1fs)",
+                "Resume data for %d download(s) not saved (time budget %.1fs)",
                 len(self._pending_resume),
                 timeout,
             )

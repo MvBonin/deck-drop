@@ -2,16 +2,11 @@ import { html } from 'htm/preact';
 import { useState, useEffect } from 'preact/hooks';
 import { api, fmtBytes, fmtSpeed } from '../api.js';
 import { formatApiError, formatTransferError, getTransferHint } from '../errors.js';
+import { t } from '../i18n/index.js';
 
-const STATUS_LABEL = {
-  queued:      '⏳ Wartend',
-  downloading: '⬇ Lädt',
-  verifying:   '🔍 Verifiziert',
-  seeding:     '↑ Seeding',
-  done:        '✓ Fertig',
-  error:       '⚠ Fehler',
-  paused:      '⏸ Pausiert',
-};
+const STATUS_LABEL_KEYS = new Set([
+  'queued', 'downloading', 'verifying', 'seeding', 'done', 'error', 'paused',
+]);
 
 const STATUS_COLOR = {
   done:  'var(--success)',
@@ -26,7 +21,7 @@ const ACTIVE_DOWNLOAD_STATUSES = new Set([
 ]);
 
 /**
- * Label for a row. `status` is coarse ("Wartend" covers both waiting for the
+ * Label for a row. `status` is coarse ("Waiting" covers both waiting for the
  * host and re-checking existing files), so prefer the detailed phase – a long
  * file check used to look like a frozen download.
  */
@@ -34,17 +29,17 @@ function statusLabel(dl) {
   if (dl.phase === 'preparing') {
     // Update: reading the files already on disk to find reusable pieces.
     const pct = Math.round((dl.phase_progress || 0) * 100);
-    return `🔍 Prüfe vorhandene Dateien ${pct} %`;
+    return t('dl.checkingFiles', { pct });
   }
   if (dl.status === 'queued' || dl.status === 'downloading') {
     if (dl.phase === 'checking') {
       const pct = Math.round((dl.phase_progress || 0) * 100);
-      return `🔍 Prüfe vorhandene Dateien ${pct} %`;
+      return t('dl.checkingFiles', { pct });
     }
-    if (dl.phase === 'metadata') return '⏳ Warte auf Metadaten vom Host…';
-    if (dl.num_peers === 0) return '⏳ Verbinde mit Host…';
+    if (dl.phase === 'metadata') return t('dl.waitMetadata');
+    if (dl.num_peers === 0) return t('dl.connecting');
   }
-  return STATUS_LABEL[dl.status] || dl.status;
+  return STATUS_LABEL_KEYS.has(dl.status) ? t(`dl.status.${dl.status}`) : dl.status;
 }
 
 /** Progress 0–100 as float (not rounded). */
@@ -65,11 +60,11 @@ function endSprintDetail(dl, pct) {
 
   const parts = [];
   if (dl.pieces_missing > 0) {
-    parts.push(`${dl.pieces_missing} Piece${dl.pieces_missing !== 1 ? 's' : ''} fehlen`);
+    parts.push(t('dl.piecesMissing', { count: dl.pieces_missing }));
   }
   const remaining = dl.bytes_remaining ?? Math.max(0, dl.total_bytes - dl.downloaded_bytes);
   if (remaining > 0) {
-    parts.push(`${fmtBytes(remaining)} fehlen`);
+    parts.push(t('dl.bytesMissing', { size: fmtBytes(remaining) }));
   }
   return parts.length ? parts.join(' · ') : null;
 }
@@ -77,9 +72,9 @@ function endSprintDetail(dl, pct) {
 function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
   const isUpdate = dl.kind === 'update';
   const displayName = dl.repair
-    ? `Reparatur: ${dl.game_name} (${dl.target_version_label || '?'})`
+    ? t('dl.repairName', { name: dl.game_name, version: dl.target_version_label || '?' })
     : isUpdate
-      ? `Update: ${dl.game_name} → ${dl.target_version_label || '?'}`
+      ? t('dl.updateName', { name: dl.game_name, version: dl.target_version_label || '?' })
       : dl.game_name;
   const pct = progressPct(dl);
   const pctLabel = formatPct(pct);
@@ -105,22 +100,22 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
         <div>
           <div class="download-name">${displayName}</div>
           <div class="download-peer">${dl.status === 'done' || dl.status === 'seeding'
-            ? `Ursprünglich von ${dl.peer_name}`
-            : `von ${dl.peer_name}`}</div>
+            ? t('dl.originallyFrom', { peer: dl.peer_name })
+            : t('dl.from', { peer: dl.peer_name })}</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
           <span style="font-size:13px;font-weight:600;color:${statusColor}">${statusLabel(dl)}</span>
           ${canPause && html`
-            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onClick=${() => onPause(dl)}>Pause</button>
+            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onClick=${() => onPause(dl)}>${t('dl.pause')}</button>
           `}
           ${canResume && html`
-            <button class="btn btn-primary" style="padding:4px 10px;font-size:12px" onClick=${() => onResume(dl)}>Weiter</button>
+            <button class="btn btn-primary" style="padding:4px 10px;font-size:12px" onClick=${() => onResume(dl)}>${t('dl.resume')}</button>
           `}
           ${canRetry && html`
-            <button class="btn btn-primary" style="padding:4px 10px;font-size:12px" onClick=${() => onRetry(dl)}>Erneut</button>
+            <button class="btn btn-primary" style="padding:4px 10px;font-size:12px" onClick=${() => onRetry(dl)}>${t('dl.retry')}</button>
           `}
           ${canRemove && html`
-            <button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onClick=${() => onRemove(dl)}>Entfernen</button>
+            <button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onClick=${() => onRemove(dl)}>${t('dl.remove')}</button>
           `}
         </div>
       </div>
@@ -129,7 +124,7 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
         <div style="margin-bottom:8px;padding:10px 12px;border-radius:8px;background:rgba(220,60,60,0.12);border:1px solid var(--danger)">
           <div style="font-size:13px;font-weight:600;color:var(--danger)">${errMsg}</div>
           ${errHint && html`
-            <div style="font-size:12px;color:var(--text-dim);margin-top:6px">Lösung: ${errHint}</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:6px">${t('dl.solution', { hint: errHint })}</div>
           `}
         </div>
       `}
@@ -142,28 +137,28 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
         <span><span class="stat-val">${pctLabel}</span></span>
         ${(dl.status === 'downloading' || dl.status === 'verifying') && html`
           <span>↓ <span class="stat-val">${fmtSpeed(dl.speed_bytes_sec)}</span></span>
-          <span><span class="stat-val">${dl.num_peers}</span> Peer${dl.num_peers !== 1 ? 's' : ''}</span>
+          <span dangerouslySetInnerHTML=${{ __html: t('dl.peers', { count: dl.num_peers }) }}></span>
         `}
         ${dl.total_bytes > 0
           ? html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`
           : dl.downloaded_bytes > 0
-            ? html`<span>${fmtBytes(dl.downloaded_bytes)} geladen</span>`
+            ? html`<span>${t('dl.downloaded', { size: fmtBytes(dl.downloaded_bytes) })}</span>`
             : (dl.status === 'queued' || dl.status === 'downloading')
-              ? html`<span style="color:var(--text-dim)">${dl.num_peers > 0 ? 'Metadaten werden geladen…' : 'Verbinde mit Host…'}</span>`
+              ? html`<span style="color:var(--text-dim)">${dl.num_peers > 0 ? t('dl.loadingMetadata') : t('dl.connectingHost')}</span>`
               : html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`}
         ${checking && html`
-          <span style="color:var(--text-dim);font-size:12px">Vorhandene Dateien werden geprüft – es wird nichts neu geladen.</span>
+          <span style="color:var(--text-dim);font-size:12px">${t('dl.checkingNote')}</span>
         `}
         ${dl.phase === 'downloading' && dl.stall_seconds > 20 && html`
-          <span style="color:var(--text-dim);font-size:12px">Keine Daten seit ${dl.stall_seconds} s – Host-Verbindung wird erneuert…</span>
+          <span style="color:var(--text-dim);font-size:12px">${t('dl.noDataSince', { seconds: dl.stall_seconds })}</span>
         `}
         ${sprint && html`<span style="color:var(--accent)">${sprint}</span>`}
         ${pct >= 99.5 && dl.bytes_remaining > 0 && (dl.status === 'downloading' || dl.status === 'verifying') && html`
-          <span style="color:var(--text-dim);font-size:12px">Host-Verbindung wird erneuert…</span>
+          <span style="color:var(--text-dim);font-size:12px">${t('dl.reconnecting')}</span>
         `}
         ${dl.num_peers >= 1 && (dl.bytes_remaining ?? 0) > 0 && (dl.bytes_remaining ?? 0) < 1024 * 1024
           && (dl.status === 'downloading' || dl.status === 'verifying') && html`
-          <span style="color:var(--text-dim);font-size:12px">Letzte Daten vom Host ausstehend – am Host Torrent neu erstellen, dann Download neu starten.</span>
+          <span style="color:var(--text-dim);font-size:12px">${t('dl.lastDataPending')}</span>
         `}
       </div>
     </div>`;
@@ -190,8 +185,8 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
       d.status === 'downloading' || d.status === 'queued' || d.status === 'verifying'
     );
     if (!active) return;
-    const t = setInterval(load, 2000);
-    return () => clearInterval(t);
+    const timer = setInterval(load, 2000);
+    return () => clearInterval(timer);
   }, [downloads]);
 
   useEffect(() => {
@@ -202,10 +197,10 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
           ? { ...d, status: 'downloading', error: null, error_hint: null }
           : d)
       );
-      showToast(`Torrent aktualisiert: ${wsEvent.data.game_name} – lädt nach…`);
+      showToast(t('dl.torrentUpgraded', { name: wsEvent.data.game_name }));
     }
     if (wsEvent.event === 'download_error') {
-      showToast(`Download fehlgeschlagen: ${formatTransferError(wsEvent.data.error)}`);
+      showToast(t('dl.failed', { error: formatTransferError(wsEvent.data.error) }));
     }
   }, [wsEvent]);
 
@@ -213,9 +208,9 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
     try {
       const updated = await api.pauseDl(dl.id);
       setDownloads(prev => prev.map(d => d.id === dl.id ? updated : d));
-      showToast(`Pausiert: ${dl.game_name}`);
+      showToast(t('dl.paused', { name: dl.game_name }));
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'download')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'download') }));
     }
   };
 
@@ -223,9 +218,9 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
     try {
       const updated = await api.resumeDl(dl.id);
       setDownloads(prev => prev.map(d => d.id === dl.id ? updated : d));
-      showToast(`Fortgesetzt: ${dl.game_name}`);
+      showToast(t('dl.resumed', { name: dl.game_name }));
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'download')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'download') }));
     }
   };
 
@@ -233,9 +228,9 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
     try {
       const updated = await api.retryDl(dl.id);
       setDownloads(prev => prev.map(d => d.id === dl.id ? updated : d));
-      showToast(`Erneut gestartet: ${dl.game_name}`);
+      showToast(t('dl.retried', { name: dl.game_name }));
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'download')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'download') }));
     }
   };
 
@@ -245,9 +240,11 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
     try {
       await api.removeDl(dl.id, deleteFiles);
       setDownloads(prev => prev.filter(d => d.id !== dl.id));
-      showToast(deleteFiles ? `„${dl.game_name}" entfernt und Ordner gelöscht` : `„${dl.game_name}" aus Liste entfernt`);
+      showToast(deleteFiles
+        ? t('dl.removedDeleted', { name: dl.game_name })
+        : t('dl.removedFromList', { name: dl.game_name }));
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'download')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'download') }));
     } finally {
       setRemoveTarget(null);
     }
@@ -259,8 +256,8 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
     <div class="view">
       <div class="view-header">
         <div>
-          <div class="view-title">Downloads</div>
-          <div class="view-subtitle">${active.length} aktiv</div>
+          <div class="view-title">${t('dl.title')}</div>
+          <div class="view-subtitle">${t('dl.active', { count: active.length })}</div>
         </div>
       </div>
 
@@ -269,8 +266,8 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
         : active.length === 0
           ? html`<div class="empty-state">
               <div class="empty-icon">📥</div>
-              <div class="empty-title">Keine Downloads</div>
-              <div class="empty-sub">Starte einen Download über den Netzwerk-Tab.</div>
+              <div class="empty-title">${t('dl.emptyTitle')}</div>
+              <div class="empty-sub">${t('dl.emptySub')}</div>
             </div>`
           : html`
             <div class="download-list">
@@ -294,27 +291,27 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
           onClick=${e => e.target === e.currentTarget && setRemoveTarget(null)}
           role="dialog"
           aria-modal="true"
-          aria-label="Download entfernen"
+          aria-label=${t('dl.removeDialog')}
         >
           <div class="dialog">
-            <div class="dialog-title">„${removeTarget.game_name}" entfernen?</div>
+            <div class="dialog-title">${t('dl.removeConfirm', { name: removeTarget.game_name })}</div>
             <p class="dialog-text">
               ${removeTarget.kind === 'update'
-                ? 'Das Update wird abgebrochen. Der Spielordner bleibt erhalten (gemischter Stand) – die Karte bietet danach erneut „Update übernehmen" an.'
-                : 'Der Download wird aus der Liste entfernt.'}
+                ? t('dl.removeUpdateText')
+                : t('dl.removeText')}
               ${removeTarget.dest_path ? html`<br/><br/><code style="font-size:11px;color:var(--text-dim)">${removeTarget.dest_path}</code>` : null}
             </p>
             <div class="dialog-actions" style="flex-direction:column;align-items:stretch;gap:8px">
               <button type="button" class="btn btn-ghost" onClick=${() => confirmRemove(false)}>
-                Nur aus Liste entfernen
+                ${t('dl.removeListOnly')}
               </button>
               ${removeTarget.kind !== 'update' && html`
                 <button type="button" class="btn btn-danger" onClick=${() => confirmRemove(true)}>
-                  Entfernen und Ordner löschen
+                  ${t('dl.removeAndDelete')}
                 </button>
               `}
               <button type="button" class="btn btn-ghost" onClick=${() => setRemoveTarget(null)}>
-                Abbrechen
+                ${t('common.cancel')}
               </button>
             </div>
           </div>

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { VersionList } from './VersionList.js';
+import { t } from '../i18n/index.js';
 
 /**
  * "Update übernehmen" dialog (Phase 5). Also used for the Phase 7 "restore"
@@ -73,30 +74,30 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
       onClick=${e => e.target === e.currentTarget && onClose()}
       role="dialog"
       aria-modal="true"
-      aria-label="Update übernehmen"
+      aria-label=${t('update.dialog')}
     >
       <div class="dialog">
-        <div class="dialog-title">Update – ${game.name}</div>
+        <div class="dialog-title">${t('update.titleFor', { name: game.name })}</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
-          Installiert: ${game.version_label || `Rev. ${game.revision ?? 1}`}
-          ${game.created_by && html` · erstellt von ${game.created_by}`}
+          ${t('update.installed', { version: game.version_label || `Rev. ${game.revision ?? 1}` })}
+          ${game.created_by && t('publish.createdBy', { name: game.created_by })}
         </div>
 
         ${modified && html`
           <div style="font-size:12px;color:var(--danger);background:rgba(220,60,60,0.12);border:1px solid var(--danger);border-radius:8px;padding:8px 10px;margin-bottom:10px">
-            ⚠ Lokale Änderungen an diesem Spiel werden überschrieben.
+            ${t('update.overwriteWarning')}
           </div>
         `}
 
         ${replacing && html`
           <div style="font-size:12px;color:var(--text-dim);background:rgba(108,142,247,0.12);border:1px solid var(--accent-dim);border-radius:8px;padding:8px 10px;margin-bottom:10px">
-            Das laufende Update wird ersetzt. Bereits geladene Daten bleiben erhalten und werden wiederverwendet.
+            ${t('update.replacing')}
           </div>
         `}
 
         ${notHashed && html`
           <div style="font-size:12px;color:var(--text-dim);background:rgba(108,142,247,0.12);border:1px solid var(--accent-dim);border-radius:8px;padding:8px 10px;margin-bottom:10px">
-            ${game.content_state === 'hashing' ? 'Die laufende Prüfung wird abgebrochen. ' : ''}Vorhandene Dateien werden beim Update geprüft und wiederverwendet – nur Abweichendes wird geladen.
+            ${game.content_state === 'hashing' ? t('update.cancelCheck') : ''}${t('update.notHashed')}
           </div>
         `}
 
@@ -105,14 +106,15 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
           : loadError
             ? html`<p style="color:var(--danger);font-size:13px">${loadError}</p>`
             : versions.length === 0
-              ? html`<p class="dialog-text">Keine Version im Netzwerk gefunden.</p>`
+              ? html`<p class="dialog-text">${t('update.noVersion')}</p>`
               : html`
                 <${VersionList} versions=${versions} value=${chosenKey} onChange=${setChosenKey} />
                 ${chosen && html`
                   <div style="font-size:13px;color:var(--text-dim);margin-top:10px">
-                    Zu laden: ${chosen.download_estimate != null
-                      ? html`ca. ${fmtBytes(chosen.download_estimate)}${chosen.size_bytes ? ` von ${fmtBytes(chosen.size_bytes)}` : ''}`
-                      : 'wird beim Prüfen ermittelt'}
+                    ${t('update.toDownload', { amount: chosen.download_estimate != null
+                      ? t('update.approx', { size: fmtBytes(chosen.download_estimate) })
+                        + (chosen.size_bytes ? t('update.ofTotal', { size: fmtBytes(chosen.size_bytes) }) : '')
+                      : t('update.estimateLater') })}
                   </div>
                 `}
                 ${chosen?.history?.length > 0 && html`
@@ -122,7 +124,7 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
                       class="btn btn-ghost"
                       style="padding:4px 8px;font-size:12px"
                       onClick=${() => setShowHistory(s => !s)}
-                    >${showHistory ? 'Verlauf ▲' : 'Verlauf ▾'}</button>
+                    >${t('update.history')} ${showHistory ? '▲' : '▾'}</button>
                     ${showHistory && html`
                       <div style="max-height:160px;overflow-y:auto;font-size:12px;margin-top:6px;display:flex;flex-direction:column;gap:6px">
                         ${chosen.history.slice().reverse().map(h => html`
@@ -142,13 +144,13 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
         ${error && html`<p style="color:var(--danger);font-size:13px;margin-top:10px">${error}</p>`}
 
         <div class="dialog-actions">
-          <button type="button" class="btn btn-ghost" onClick=${onClose} disabled=${submitting}>Abbrechen</button>
+          <button type="button" class="btn btn-ghost" onClick=${onClose} disabled=${submitting}>${t('common.cancel')}</button>
           <button
             type="button"
             class="btn btn-primary"
             disabled=${submitting || loading || !chosenKey}
             onClick=${submit}
-          >${submitting ? html`<span class="spinner"></span>` : 'Aktualisieren'}</button>
+          >${submitting ? html`<span class="spinner"></span>` : t('update.submit')}</button>
         </div>
       </div>
     </div>`;

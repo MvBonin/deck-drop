@@ -24,21 +24,21 @@ def test_nav_renders(page: Page) -> None:
     """The nav bar with all four tab buttons is visible after the app mounts."""
     nav = page.locator("nav.nav")
     expect(nav).to_be_visible(timeout=10_000)
-    # All four German-labelled tabs must be present
-    for label in ("Meine Spiele", "Netzwerk", "Downloads", "Einstellungen"):
+    # English is the default language
+    for label in ("My Games", "Network", "Downloads", "Settings"):
         expect(nav.get_by_text(label)).to_be_visible()
 
 
 def test_default_view_is_my_games(page: Page) -> None:
-    """The active tab on first load is 'Meine Spiele' (My Games)."""
+    """The active tab on first load is 'My Games'."""
     active = page.locator("button.nav-tab.active")
-    expect(active).to_contain_text("Meine Spiele", timeout=10_000)
+    expect(active).to_contain_text("My Games", timeout=10_000)
 
 
 def test_settings_view_loads(page: Page) -> None:
     """Clicking the settings tab shows the settings panel with a save button."""
-    page.locator("nav.nav").get_by_text("Einstellungen").click()
-    expect(page.get_by_role("button", name="Speichern")).to_be_visible(timeout=10_000)
+    page.locator("nav.nav").get_by_text("Settings").click()
+    expect(page.get_by_role("button", name="Save")).to_be_visible(timeout=10_000)
 
 
 def test_api_status_endpoint(page: Page, live_server_url: str) -> None:
@@ -58,7 +58,7 @@ def test_debug_mode_via_url(page: Page, live_server_url: str) -> None:
 
     page.goto(f"{live_server_url}/?debug=1", wait_until="domcontentloaded")
     nav.get_by_text("Debug").click()
-    expect(page.get_by_text("Hash-Ereignisse (warum wird gehasht?)")).to_be_visible(timeout=10_000)
+    expect(page.get_by_text("Hash events (why is something hashed?)")).to_be_visible(timeout=10_000)
 
     # Remembered without the parameter, switched off with ?debug=0.
     page.goto(live_server_url, wait_until="domcontentloaded")
@@ -69,7 +69,7 @@ def test_debug_mode_via_url(page: Page, live_server_url: str) -> None:
 
 
 def test_update_button_visible_while_hashing(page: Page, live_server_url: str) -> None:
-    """A game still hashing its old version must already offer "Aktualisieren…"
+    """A game still hashing its old version must already offer "Update…"
     (the update replaces that hash). /api/games is stubbed – no peer needed."""
     game = {
         "id": "dawn1",
@@ -93,9 +93,9 @@ def test_update_button_visible_while_hashing(page: Page, live_server_url: str) -
     page.goto(live_server_url, wait_until="domcontentloaded")
 
     card = page.get_by_role("article", name="Dawnwalker")
-    expect(card.get_by_text("Update verfügbar: 1.0.5")).to_be_visible(timeout=10_000)
-    expect(card.get_by_role("button", name="Aktualisieren…")).to_be_visible()
-    expect(card.get_by_text("Game-Hashes berechnen…")).to_be_visible()
+    expect(card.get_by_text("Update available: 1.0.5")).to_be_visible(timeout=10_000)
+    expect(card.get_by_role("button", name="Update…")).to_be_visible()
+    expect(card.get_by_text("Computing game hashes…")).to_be_visible()
 
 
 def test_downloads_show_update_preparation(page: Page, live_server_url: str) -> None:
@@ -123,12 +123,12 @@ def test_downloads_show_update_preparation(page: Page, live_server_url: str) -> 
     page.locator("nav.nav").get_by_text("Downloads").click()
 
     expect(page.get_by_text("Update: Dawnwalker → 1.0.5")).to_be_visible(timeout=10_000)
-    expect(page.get_by_text("Prüfe vorhandene Dateien 42 %")).to_be_visible()
+    expect(page.get_by_text("Checking existing files 42 %")).to_be_visible()
     expect(page.get_by_role("button", name="Pause")).to_be_visible()
 
 
 def test_restart_button_while_update_runs(page: Page, live_server_url: str) -> None:
-    """A running update whose host moved on offers "Update neu starten"."""
+    """A running update whose host moved on offers "Restart update"."""
     game = {
         "id": "dawn1",
         "name": "Dawnwalker",
@@ -151,8 +151,8 @@ def test_restart_button_while_update_runs(page: Page, live_server_url: str) -> N
     page.goto(live_server_url, wait_until="domcontentloaded")
 
     card = page.get_by_role("article", name="Dawnwalker")
-    expect(card.get_by_text("Wird aktualisiert…", exact=False)).to_be_visible(timeout=10_000)
-    expect(card.get_by_role("button", name="Update neu starten: 1.0.6…")).to_be_visible()
+    expect(card.get_by_text("Updating…", exact=False)).to_be_visible(timeout=10_000)
+    expect(card.get_by_role("button", name="Restart update: 1.0.6…")).to_be_visible()
 
 
 def test_repair_dialog_offers_version_and_source(page: Page, live_server_url: str) -> None:
@@ -197,11 +197,11 @@ def test_repair_dialog_offers_version_and_source(page: Page, live_server_url: st
     page.route("**/api/games/dawn1/updates", lambda route: route.fulfill(json=updates))
     page.goto(live_server_url, wait_until="domcontentloaded")
 
-    page.get_by_role("button", name="Spiel reparieren").click()
-    dialog = page.get_by_role("dialog", name="Spiel reparieren")
+    page.get_by_role("button", name="Repair game").click()
+    dialog = page.get_by_role("dialog", name="Repair game")
     expect(dialog.get_by_text("1.0.5").first).to_be_visible(timeout=10_000)
-    expect(dialog.get_by_label("Quelle")).to_have_value("pc")
-    expect(dialog.get_by_role("button", name="Reparieren", exact=True)).to_be_enabled()
+    expect(dialog.get_by_label("Source")).to_have_value("pc")
+    expect(dialog.get_by_role("button", name="Repair", exact=True)).to_be_enabled()
 
 
 def test_settings_update_check_and_lan_offer(page: Page, live_server_url: str) -> None:
@@ -232,15 +232,79 @@ def test_settings_update_check_and_lan_offer(page: Page, live_server_url: str) -
     page.route("**/api/selfupdate", lambda route: route.fulfill(json=base))
     page.route("**/api/selfupdate/check", lambda route: route.fulfill(json=checked))
     page.goto(live_server_url, wait_until="domcontentloaded")
-    page.locator("nav.nav").get_by_text("Einstellungen").click()
+    page.locator("nav.nav").get_by_text("Settings").click()
 
-    expect(page.get_by_text("Neuere Version 2.1.0 im Netzwerk gefunden")).to_be_visible(
+    expect(page.get_by_text("Newer version 2.1.0 found on the network")).to_be_visible(
         timeout=10_000
     )
-    expect(page.get_by_role("button", name="Von MVB Desktop aktualisieren")).to_be_visible()
+    expect(page.get_by_role("button", name="Update from MVB Desktop")).to_be_visible()
     prompts: list[str] = []
     page.once("dialog", lambda d: (prompts.append(d.message), d.accept()))
-    page.get_by_role("button", name="Nach Updates suchen").click()
-    expect(page.get_by_text("Version 2.1.0 verfügbar")).to_be_visible()
+    page.get_by_role("button", name="Check for updates").click()
+    expect(page.get_by_text("Version 2.1.0 available")).to_be_visible()
     assert "GitHub" in prompts[0]
-    expect(page.get_by_role("button", name="Jetzt aktualisieren")).to_be_visible()
+    expect(page.get_by_role("button", name="Update now")).to_be_visible()
+
+
+def _stub_status(page: Page, live_server_url: str, **overrides) -> None:
+    real = page.request.get(f"{live_server_url}/api/status").json()
+    page.route("**/api/status", lambda route: route.fulfill(json={**real, **overrides}))
+
+
+def test_saved_language_is_used(page: Page, live_server_url: str) -> None:
+    """The language stored in the config (via /api/status) drives the UI."""
+    _stub_status(page, live_server_url, language="de")
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    nav = page.locator("nav.nav")
+    for label in ("Meine Spiele", "Netzwerk", "Einstellungen"):
+        expect(nav.get_by_text(label)).to_be_visible(timeout=10_000)
+    expect(page.locator("html")).to_have_attribute("lang", "de")
+
+
+def test_settings_language_switch_applies_without_reload(page: Page, live_server_url: str) -> None:
+    saved: list[dict] = []
+
+    def fake_put(route):
+        if route.request.method != "PUT":
+            route.fallback()
+            return
+        saved.append(route.request.post_data_json)
+        route.fulfill(json={})
+
+    # Stubbed so the shared live server stays in English for the other tests.
+    page.route("**/api/settings", fake_put)
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    page.locator("nav.nav").get_by_text("Settings").click()
+    page.get_by_label("Language").select_option("de")
+
+    nav = page.locator("nav.nav")
+    expect(nav.get_by_text("Einstellungen")).to_be_visible(timeout=10_000)
+    expect(page.get_by_role("button", name="Speichern")).to_be_visible()
+    assert saved == [{"language": "de"}]
+
+
+def test_onboarding_asks_for_language(page: Page, live_server_url: str) -> None:
+    """First start: English is preselected, picking German switches the form
+    right away and is saved together with the name."""
+    _stub_status(page, live_server_url, onboarding_complete=False)
+    saved: list[dict] = []
+
+    def fake_put(route):
+        saved.append(route.request.post_data_json)
+        route.fulfill(json={})
+
+    page.route("**/api/settings", fake_put)
+    page.goto(live_server_url, wait_until="domcontentloaded")
+
+    expect(page.get_by_role("radio", name="English")).to_have_attribute(
+        "aria-checked", "true", timeout=10_000
+    )
+    expect(page.get_by_text("Your name on the network")).to_be_visible()
+    page.get_by_role("radio", name="Deutsch").click()
+    expect(page.get_by_text("Dein Name im Netzwerk")).to_be_visible()
+
+    page.get_by_label("Dein Name im Netzwerk").fill("Deck-Test")
+    page.get_by_role("checkbox").check()
+    page.get_by_role("button", name="Loslegen →").click()
+    expect(page.locator("nav.nav").get_by_text("Meine Spiele")).to_be_visible(timeout=10_000)
+    assert saved == [{"user_name": "Deck-Test", "language": "de", "onboarding_complete": True}]

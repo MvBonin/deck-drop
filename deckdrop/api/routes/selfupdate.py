@@ -60,7 +60,7 @@ def install_selfupdate(req: InstallRequest) -> dict[str, Any]:
         peer = registry.get(req.source) if registry is not None else None
         offer = getattr(peer, "app_offer", None) if peer else None
         if not peer or not peer.online or not isinstance(offer, dict):
-            raise HTTPException(404, "Peer bietet kein DeckDrop-Update an.")
+            raise HTTPException(404, t("err.peer_no_update"))
         from deckdrop.network.peer_registry import _peer_http_url
 
         src = {

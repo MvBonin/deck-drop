@@ -66,3 +66,28 @@ def test_downloads_empty(client):
 def test_download_without_libtorrent_returns_503(client):
     r = client.post("/api/download", json={"peer_id": "abc", "game_id": "xyz"})
     assert r.status_code == 503
+
+
+def test_language_defaults_to_english(client):
+    assert client.get("/api/settings").json()["language"] == "en"
+    assert client.get("/api/status").json()["language"] == "en"
+
+
+def test_language_switch_translates_server_messages(client):
+    r = client.get("/api/games/missing")
+    assert r.json()["detail"] == "Game not found"
+
+    r = client.put("/api/settings", json={"language": "de"})
+    assert r.status_code == 200
+    assert r.json()["language"] == "de"
+    assert client.get("/api/status").json()["language"] == "de"
+    assert cfg_mod.load().language == "de"
+
+    r = client.get("/api/games/missing")
+    assert r.json()["detail"] == "Spiel nicht gefunden"
+
+
+def test_unknown_language_rejected(client):
+    r = client.put("/api/settings", json={"language": "xx"})
+    assert r.status_code == 422
+    assert client.get("/api/settings").json()["language"] == "en"

@@ -102,6 +102,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "err.update_already_running": "This update is already running.",
         "err.no_checked_update": "No verified update from GitHub – check for updates first.",
         "err.no_signed_package": "No signed DeckDrop package available",
+        "err.peer_no_update": "Peer does not offer a DeckDrop update.",
         "err.appimage_unknown": "AppImage path unknown – service cannot be set up",
         # -- transfer errors (shown on download cards) --
         "transfer.path_not_found": "File path not found.",
@@ -149,6 +150,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "update.foreign_manifest": "Manifest does not belong to DeckDrop.",
         "update.manifest_no_version": "Manifest has no valid version.",
         "update.manifest_no_appimage": "Manifest contains no AppImage.",
+        "update.appimage_only": "Only the AppImage can update itself.",
         "update.no_write_access": "No write permission for {path}.",
         "update.unsigned_release": "Release is not signed (release.json missing).",
         "update.version_mismatch": "Manifest version does not match the release.",
@@ -243,6 +245,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "err.update_already_running": "Dieses Update läuft bereits.",
         "err.no_checked_update": "Kein geprüftes Update von GitHub – erst suchen.",
         "err.no_signed_package": "Kein signiertes DeckDrop-Paket verfügbar",
+        "err.peer_no_update": "Peer bietet kein DeckDrop-Update an.",
         "err.appimage_unknown": "AppImage-Pfad unbekannt – Service kann nicht eingerichtet werden",
         # -- transfer errors (shown on download cards) --
         "transfer.path_not_found": "Dateipfad nicht gefunden.",
@@ -288,6 +291,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "update.foreign_manifest": "Manifest gehört nicht zu DeckDrop.",
         "update.manifest_no_version": "Manifest ohne gültige Version.",
         "update.manifest_no_appimage": "Manifest enthält keine AppImage.",
+        "update.appimage_only": "Nur die AppImage kann sich selbst aktualisieren.",
         "update.no_write_access": "Kein Schreibrecht für {path}.",
         "update.unsigned_release": "Release ist nicht signiert (release.json fehlt).",
         "update.version_mismatch": "Manifest-Version passt nicht zum Release.",

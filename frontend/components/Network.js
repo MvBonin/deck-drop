@@ -7,6 +7,7 @@ import { Comments } from './Comments.js';
 import { VersionList } from './VersionList.js';
 import { UpdateGame } from './UpdateGame.js';
 import { useGridNav } from '../app.js';
+import { t } from '../i18n/index.js';
 
 export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   const [games, setGames]     = useState([]);
@@ -45,8 +46,8 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   useEffect(() => {
     const waiting = games.some(g => !g.has_torrent && !g.torrent_prep_error);
     if (!waiting) return;
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
   }, [games]);
 
   const startDownload = async (game, versionKey) => {
@@ -57,9 +58,9 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
       if (versionKey) body.version_key = versionKey;
       const dl = await api.startDl(body);
       onDownloadStarted?.(dl);
-      showToast(`Download gestartet: ${game.name}`);
+      showToast(t('net.downloadStarted', { name: game.name }));
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'download')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'download') }));
     } finally {
       setStarting(null);
     }
@@ -99,8 +100,8 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
     <div class="view">
       <div class="view-header">
         <div>
-          <div class="view-title">Netzwerk</div>
-          <div class="view-subtitle">${onlineCount} Peer${onlineCount !== 1 ? 's' : ''} online</div>
+          <div class="view-title">${t('net.title')}</div>
+          <div class="view-subtitle">${t('net.peersOnline', { count: onlineCount })}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${peers.map(p => html`
@@ -116,10 +117,10 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
           <input
             type="search"
             class="search-input"
-            placeholder="Spiele suchen…"
+            placeholder=${t('net.search')}
             value=${query}
             onInput=${e => setQuery(e.target.value)}
-            aria-label="Spiele suchen"
+            aria-label=${t('net.searchLabel')}
           />
         </div>
       `}
@@ -129,16 +130,16 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
         : games.length === 0
           ? html`<div class="empty-state">
               <div class="empty-icon">📡</div>
-              <div class="empty-title">${onlineCount > 0 ? 'Keine Spiele von Peers' : 'Keine Peers gefunden'}</div>
+              <div class="empty-title">${onlineCount > 0 ? t('net.noGames') : t('net.noPeers')}</div>
               <div class="empty-sub">${onlineCount > 0
-                ? 'Peers sind online, teilen aber noch keine Spiele – oder die Spieleliste lädt noch (einige Sekunden warten).'
-                : 'Starte DeckDrop auf anderen Geräten im gleichen WLAN.'}</div>
+                ? t('net.noGamesSub')
+                : t('net.noPeersSub')}</div>
             </div>`
           : filtered.length === 0
             ? html`<div class="empty-state">
                 <div class="empty-icon">🔍</div>
-                <div class="empty-title">Keine Treffer</div>
-                <div class="empty-sub">Keine Spiele für "${query}" gefunden.</div>
+                <div class="empty-title">${t('net.noMatches')}</div>
+                <div class="empty-sub">${t('net.noMatchesSub', { query })}</div>
               </div>`
             : html`<div class="card-grid" ref=${gridRef} role="list">
                 ${filtered.map(g => html`
@@ -169,17 +170,17 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
           onClick=${e => e.target === e.currentTarget && setVersionGame(null)}
           role="dialog"
           aria-modal="true"
-          aria-label="Version wählen"
+          aria-label=${t('net.chooseVersion')}
         >
           <div class="dialog">
-            <div class="dialog-title">Version wählen – ${versionGame.name}</div>
+            <div class="dialog-title">${t('net.chooseVersionFor', { name: versionGame.name })}</div>
             <${VersionList}
               versions=${versionGame.versions || []}
               value=${chosenVersionKey}
               onChange=${setChosenVersionKey}
             />
             <div class="dialog-actions">
-              <button class="btn btn-ghost" onClick=${() => setVersionGame(null)}>Abbrechen</button>
+              <button class="btn btn-ghost" onClick=${() => setVersionGame(null)}>${t('common.cancel')}</button>
               <button
                 class="btn btn-primary"
                 disabled=${!chosenVersionKey}
@@ -189,7 +190,7 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
                   setVersionGame(null);
                   startDownload(g, key);
                 }}
-              >Diese Version laden</button>
+              >${t('net.downloadVersion')}</button>
             </div>
           </div>
         </div>
@@ -204,7 +205,7 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
             setUpdateGame(null);
             onDownloadStarted?.(dl);
             onNavigate('downloads');
-            showToast(`Update gestartet: ${name}`);
+            showToast(t('net.updateStarted', { name }));
           }}
         />
       `}

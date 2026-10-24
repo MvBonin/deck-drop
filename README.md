@@ -145,6 +145,14 @@ tests/          pytest test suite
 packaging/      AppImage builder, systemd service, .desktop files
 ```
 
+Translations: the UI is available in English (default) and German; the
+language is picked on first start and can be changed in Settings. Strings live
+in `frontend/i18n/<lang>.js` (web UI), `deckdrop/core/i18n.py` (server
+messages) and `decky-plugin/src/index.tsx` (Gaming Mode panel). To add a
+language, add a catalog in each place and register its code
+(`LANGUAGES` / `SUPPORTED_LANGUAGES`); `tests/test_i18n.py` checks that no key
+is missing.
+
 Releases: see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## License
