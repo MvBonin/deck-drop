@@ -217,7 +217,7 @@ def test_route_restarts_running_update_and_rejects_same(env, monkeypatch):
 
     r = client.post(f"/api/games/{info.id}/update", json={"version_key": "c3"})
     assert r.status_code == 409
-    assert "läuft bereits" in r.json()["detail"]
+    assert "already running" in r.json()["detail"]
     assert tracker.state(info.id) == "updating"
 
 

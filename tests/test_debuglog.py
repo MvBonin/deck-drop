@@ -26,7 +26,7 @@ def test_record_and_events_newest_first_with_filter():
     events = debuglog.events()
     assert [e["reason"] for e in events] == ["stall", "new_local_game"]
     assert events[1]["file_count"] == 2
-    assert events[1]["reason_text"] == debuglog.REASON_TEXT["new_local_game"]
+    assert events[1]["reason_text"] == debuglog.reason_text("new_local_game")
     assert [e["game_id"] for e in debuglog.events("g1")] == ["g1"]
 
 

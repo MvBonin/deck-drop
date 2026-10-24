@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from deckdrop.core import i18n
 from deckdrop.core.config import Config
 from deckdrop.core.library import Library
 from deckdrop.network.peer_registry import PeerRegistry
@@ -46,6 +47,7 @@ def init(
     content: object | None = None,
 ) -> None:
     global _state
+    i18n.set_language(cfg.language)
     _state = AppState(
         cfg=cfg,
         library=library,

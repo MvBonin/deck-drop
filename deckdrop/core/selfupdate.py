@@ -25,6 +25,7 @@ from typing import Any
 
 from deckdrop import __version__
 from deckdrop.core import ed25519, release_key
+from deckdrop.core.i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class UpdateError(Exception):
 def parse_version(v: str) -> tuple[int, ...]:
     m = re.match(r"^v?(\d+(?:\.\d+)*)", (v or "").strip())
     if not m:
-        raise ValueError(f"Keine gültige Version: {v!r}")
+        raise ValueError(t("update.invalid_version", version=repr(v)))
     return tuple(int(x) for x in m.group(1).split("."))
 
 
@@ -70,27 +71,27 @@ def verify_manifest(manifest_bytes: bytes, signature: bytes, keys: list[str] | N
     """
     keys = release_key.PUBLIC_KEYS if keys is None else keys
     if not keys:
-        raise UpdateError("Kein Signaturschlüssel eingebaut – Updates können nicht geprüft werden.")
+        raise UpdateError(t("update.no_key"))
     sig = signature.strip()
     if len(sig) != 64:
         try:
             sig = bytes.fromhex(sig.decode("ascii"))
         except (UnicodeDecodeError, ValueError):
-            raise UpdateError("Signatur ungültig.") from None
+            raise UpdateError(t("update.bad_signature")) from None
     if not any(ed25519.verify(bytes.fromhex(k), manifest_bytes, sig) for k in keys):
-        raise UpdateError("Signatur ungültig – Update stammt nicht vom DeckDrop-Projekt.")
+        raise UpdateError(t("update.foreign_signature"))
     try:
         manifest = json.loads(manifest_bytes)
     except ValueError:
         raise UpdateError("Manifest unlesbar.") from None
     if manifest.get("app") != "deckdrop":
-        raise UpdateError("Manifest gehört nicht zu DeckDrop.")
+        raise UpdateError(t("update.foreign_manifest"))
     try:
         parse_version(str(manifest.get("version", "")))
     except ValueError:
-        raise UpdateError("Manifest ohne gültige Version.") from None
+        raise UpdateError(t("update.manifest_no_version")) from None
     if not appimage_entry(manifest):
-        raise UpdateError("Manifest enthält keine AppImage.")
+        raise UpdateError(t("update.manifest_no_appimage"))
     return manifest
 
 
@@ -141,7 +142,7 @@ def can_self_update() -> tuple[bool, str]:
     if path is None or not path.is_file():
         return False, "Nur die AppImage kann sich selbst aktualisieren."
     if not os.access(path.parent, os.W_OK) or not os.access(path, os.W_OK):
-        return False, f"Kein Schreibrecht für {path}."
+        return False, t("update.no_write_access", path=path)
     return True, ""
 
 
@@ -212,7 +213,7 @@ def check_github(client: Any | None = None) -> dict:
                 "latest": None,
                 "newer": False,
                 "error": None,
-                "message": "Noch kein Release auf GitHub.",
+                "message": t("update.no_release"),
             }
             _state.github = result
             return result
@@ -233,12 +234,12 @@ def check_github(client: Any | None = None) -> dict:
         if result["newer"]:
             try:
                 if MANIFEST_NAME not in assets or SIGNATURE_NAME not in assets:
-                    raise UpdateError("Release ist nicht signiert (release.json fehlt).")
+                    raise UpdateError(t("update.unsigned_release"))
                 m_bytes = client.get(assets[MANIFEST_NAME]).content
                 sig = client.get(assets[SIGNATURE_NAME]).content
                 manifest = verify_manifest(m_bytes, sig)
                 if str(manifest["version"]) != latest:
-                    raise UpdateError("Manifest-Version passt nicht zum Release.")
+                    raise UpdateError(t("update.version_mismatch"))
                 entry = appimage_entry(manifest)
                 url = assets.get(entry["name"])
                 if not url:
@@ -256,7 +257,7 @@ def check_github(client: Any | None = None) -> dict:
         return result
     except Exception as exc:
         log.warning("Update check failed: %s", exc)
-        result = {"ok": False, "error": f"GitHub nicht erreichbar: {exc}"}
+        result = {"ok": False, "error": t("update.github_unreachable", error=exc)}
         _state.github = result
         return result
     finally:
@@ -359,12 +360,12 @@ def start_install(source: dict, *, background: bool = True) -> None:
     if not ok:
         raise UpdateError(reason)
     if _state.install.get("state") in ("downloading", "verifying"):
-        raise UpdateError("Ein Update läuft bereits.")
+        raise UpdateError(t("update.already_running"))
     manifest = verify_manifest(
         source["manifest"].encode("utf-8"), str(source["signature"]).encode()
     )
     if not is_newer(str(manifest["version"])):
-        raise UpdateError("Angebotene Version ist nicht neuer als die installierte.")
+        raise UpdateError(t("update.not_newer"))
     _set_install(
         state="downloading",
         progress=0.0,
@@ -372,13 +373,13 @@ def start_install(source: dict, *, background: bool = True) -> None:
         version=str(manifest["version"]),
         source=source.get("label", source["kind"]),
     )
-    t = threading.Thread(
+    worker = threading.Thread(
         target=_install_worker, args=(source, manifest), daemon=True, name="selfupdate-install"
     )
     if background:
-        t.start()
+        worker.start()
     else:
-        t.run()
+        worker.run()
 
 
 def _install_worker(source: dict, manifest: dict) -> None:
@@ -407,15 +408,15 @@ def _install_worker(source: dict, manifest: dict) -> None:
                 h.update(chunk)
                 done += len(chunk)
                 if total and done > total:
-                    raise UpdateError("Download größer als im Manifest angegeben.")
+                    raise UpdateError(t("update.too_large"))
                 if total and time.monotonic() - last > 0.3:
                     last = time.monotonic()
                     _set_install(progress=done / total)
         _set_install(state="verifying", progress=1.0)
         if h.hexdigest() != entry["sha256"]:
-            raise UpdateError("Prüfsumme passt nicht zum signierten Manifest – nichts ersetzt.")
+            raise UpdateError(t("update.checksum_mismatch"))
         if total and done != total:
-            raise UpdateError("Download unvollständig – nichts ersetzt.")
+            raise UpdateError(t("update.incomplete"))
         os.chmod(part, 0o755)
         bak = backup_path()
         os.replace(path, bak)

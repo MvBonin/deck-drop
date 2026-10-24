@@ -227,7 +227,7 @@ def test_start_download_german_404_peer(tmp_path, monkeypatch):
 
     r = c.post("/api/download", json={"peer_id": "missing", "game_id": "g1"})
     assert r.status_code == 404
-    assert "nicht gefunden" in r.json()["detail"]
+    assert "not found" in r.json()["detail"]
 
 
 def test_downloads_expose_phase_fields(client):

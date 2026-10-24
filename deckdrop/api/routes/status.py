@@ -18,4 +18,5 @@ def get_status() -> dict:
         "name": cfg.user_name,
         "peer_id": cfg.peer_id,
         "onboarding_complete": cfg.onboarding_complete,
+        "language": cfg.language,
     }

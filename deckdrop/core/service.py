@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from deckdrop.core.hostenv import host_env
+from deckdrop.core.i18n import t
 
 InstallType = Literal["flatpak", "appimage", "pipx"]
 
@@ -54,7 +55,7 @@ def _exec_start(install_type: InstallType, appimage_path: str = "") -> str:
     if install_type == "appimage":
         path = appimage_path or os.getenv("APPIMAGE", "")
         if not path:
-            raise ValueError("AppImage-Pfad unbekannt – Service kann nicht eingerichtet werden")
+            raise ValueError(t("err.appimage_unknown"))
         return f"{path} --headless"
     return "%h/.local/bin/deckdrop --headless"
 

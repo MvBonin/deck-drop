@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
 from deckdrop.core import selfupdate
+from deckdrop.core.i18n import t
 
 router = APIRouter(tags=["selfupdate"])
 
@@ -52,9 +53,7 @@ def install_selfupdate(req: InstallRequest) -> dict[str, Any]:
         gh = selfupdate._state.github or {}
         src = gh.get("_source")
         if not src:
-            raise HTTPException(
-                409, gh.get("error") or "Kein geprüftes Update von GitHub – erst suchen."
-            )
+            raise HTTPException(409, gh.get("error") or t("err.no_checked_update"))
         src = {**src, "label": "GitHub"}
     else:
         registry = _registry()
@@ -114,14 +113,14 @@ def rollback_selfupdate() -> dict[str, bool]:
 def get_offer() -> dict[str, Any]:
     offer = selfupdate.local_offer()
     if offer is None:
-        raise HTTPException(404, "Kein signiertes DeckDrop-Paket verfügbar")
+        raise HTTPException(404, t("err.no_signed_package"))
     return offer
 
 
 @router.get("/selfupdate/package")
 def get_package() -> FileResponse:
     if selfupdate.local_offer() is None:
-        raise HTTPException(404, "Kein signiertes DeckDrop-Paket verfügbar")
+        raise HTTPException(404, t("err.no_signed_package"))
     path = selfupdate.appimage_path()
     return FileResponse(
         str(path),

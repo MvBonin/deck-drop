@@ -41,6 +41,7 @@ from deckdrop.core.comments import (
 from deckdrop.core.config import save as save_cfg
 from deckdrop.core.cover import COVER_FILENAMES, clear_covers, download_steam_cover, has_local_cover
 from deckdrop.core.game import GameInfo
+from deckdrop.core.i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -249,7 +250,7 @@ def get_game(game_id: str) -> GameOut:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
     return GameOut.from_info(g)
 
 
@@ -259,7 +260,7 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
     path = Path(req.path).expanduser().resolve()
 
     if not path.is_dir():
-        raise HTTPException(400, f"Path is not a directory: {path}")
+        raise HTTPException(400, t("err.not_a_directory", path=path))
 
     if s.library.needs_wizard(path):
         if not req.name:
@@ -278,7 +279,7 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
     else:
         loaded = game_mod.load_from_path(path)
         if not loaded:
-            raise HTTPException(500, "Failed to load deckdrop.toml")
+            raise HTTPException(500, t("err.toml_load_failed"))
         info = loaded
 
     # Register path in config if it's outside the download_dir
@@ -308,7 +309,7 @@ def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     changed = False
     if req.name is not None:
@@ -353,7 +354,7 @@ def remove_game(game_id: str) -> None:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     # Remove from individual paths list if it was there
     s.cfg.remove_game_path(g.path)
@@ -366,7 +367,7 @@ def list_comments(game_id: str) -> list[CommentOut]:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
     comments = load_comments(g.path)
     return [CommentOut.from_comment(c) for c in comments]
 
@@ -381,9 +382,9 @@ def add_comment(game_id: str, req: AddCommentRequest) -> CommentOut:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
     if not req.text.strip():
-        raise HTTPException(400, "Kommentar darf nicht leer sein")
+        raise HTTPException(400, t("err.comment_empty"))
     comment = new_comment(author=s.cfg.user_name, text=req.text.strip())
     existing = load_comments(g.path)
     save_comments(g.path, existing + [comment])
@@ -394,12 +395,12 @@ def add_comment(game_id: str, req: AddCommentRequest) -> CommentOut:
 def get_cover(game_id: str) -> FileResponse:
     g = app_state.get().library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
     for name in COVER_FILENAMES:
         p = g.path / name
         if p.is_file():
             return FileResponse(p)
-    raise HTTPException(404, "Kein lokales Cover gefunden")
+    raise HTTPException(404, t("err.no_local_cover"))
 
 
 @router.post("/games/{game_id}/search_cover", dependencies=[Depends(local_only)])
@@ -407,7 +408,7 @@ async def search_cover(game_id: str) -> dict[str, int]:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     search_url = (
         f"https://store.steampowered.com/api/storesearch/?term={quote(g.name)}&l=english&cc=US"
@@ -419,10 +420,10 @@ async def search_cover(game_id: str) -> dict[str, int]:
             items = r.json().get("items", [])
     except Exception as exc:
         log.warning("Steam cover search failed for %r: %s", g.name, exc)
-        raise HTTPException(502, f"Steam-Suche fehlgeschlagen: {exc}") from exc
+        raise HTTPException(502, t("err.steam_search_failed", error=exc)) from exc
 
     if not items:
-        raise HTTPException(404, "Kein Steam-Treffer für diesen Spielnamen")
+        raise HTTPException(404, t("err.steam_no_match"))
 
     app_id: int = items[0]["id"]
     g.steam.app_id = app_id
@@ -438,14 +439,14 @@ def get_magnet(game_id: str) -> dict[str, str]:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     tracker = s.get_content_tracker()
     tracker.scan(game_id)
     if not tracker.is_shareable(game_id):
         raise HTTPException(
             409,
-            "Spiel wurde verändert – erst als Update veröffentlichen.",
+            t("err.game_modified"),
         )
 
     if not g.torrent.magnet:
@@ -453,11 +454,11 @@ def get_magnet(game_id: str) -> dict[str, str]:
     if not g.torrent.magnet:
         prep_err = torrent_prep.get_prep_error(game_id)
         if prep_err:
-            raise HTTPException(503, f"Torrent konnte nicht erzeugt werden: {prep_err}") from None
+            raise HTTPException(503, t("err.torrent_build_failed", error=prep_err)) from None
         torrent_prep.schedule_prepare(game_id)
         raise HTTPException(
             409,
-            "Torrent wird vorbereitet – bitte kurz warten und erneut versuchen.",
+            t("err.torrent_preparing"),
         )
 
     cache_path = s.cfg.torrent_cache / f"{g.id}.torrent"
@@ -473,14 +474,14 @@ def get_manifest(game_id: str) -> dict:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     tracker = s.get_content_tracker()
     tracker.scan(game_id)
     if not tracker.is_shareable(game_id):
         raise HTTPException(
             409,
-            "Spiel wurde verändert – erst als Update veröffentlichen.",
+            t("err.game_modified"),
         )
     return game_mod.manifest_dict(g)
 
@@ -491,25 +492,25 @@ def get_torrent(game_id: str) -> Response:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     tracker = s.get_content_tracker()
     tracker.scan(game_id)
     if not tracker.is_shareable(game_id):
         raise HTTPException(
             409,
-            "Spiel wurde verändert – erst als Update veröffentlichen.",
+            t("err.game_modified"),
         )
 
     cache_path = s.cfg.torrent_cache / f"{g.id}.torrent"
     if not cache_path.is_file():
         prep_err = torrent_prep.get_prep_error(game_id)
         if prep_err:
-            raise HTTPException(503, f"Torrent konnte nicht erzeugt werden: {prep_err}") from None
+            raise HTTPException(503, t("err.torrent_build_failed", error=prep_err)) from None
         torrent_prep.schedule_prepare(game_id)
         raise HTTPException(
             409,
-            "Torrent wird vorbereitet – bitte kurz warten und erneut versuchen.",
+            t("err.torrent_preparing"),
         )
 
     return Response(content=cache_path.read_bytes(), media_type="application/x-bittorrent")
@@ -540,7 +541,7 @@ def scan_game(game_id: str) -> GameOut:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
     s.get_content_tracker().scan(game_id)
     return GameOut.from_info(g)
 
@@ -550,7 +551,7 @@ def get_changes(game_id: str) -> dict[str, object]:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
     tracker = s.get_content_tracker()
     tracker.scan(game_id)
     lists = tracker.change_lists(game_id)
@@ -594,16 +595,16 @@ def publish_game(game_id: str, req: PublishRequest) -> dict[str, str]:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     for rel in req.exclude:
         if content.safe_join(g.path, rel) is None:
-            raise HTTPException(400, f"Ungültiger Pfad: {rel}")
+            raise HTTPException(400, t("err.invalid_path", path=rel))
 
     tracker = s.get_content_tracker()
     state = tracker.state(game_id)
     if state in ("hashing", "publishing", "updating"):
-        raise HTTPException(400, f"Spiel ist gerade beschäftigt ({state})")
+        raise HTTPException(400, t("err.game_busy", state=state))
 
     tracker.publish(game_id, req.version_label.strip(), req.note.strip(), req.exclude)
     return {"status": "publishing"}
@@ -638,7 +639,7 @@ async def get_updates(game_id: str) -> dict:
     s = app_state.get()
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     tracker = s.get_content_tracker()
     network_games = s.peer_registry.all_network_games()
@@ -711,10 +712,10 @@ async def update_game(game_id: str, req: UpdateRequest) -> DownloadOut:
     """
     s = app_state.get()
     if s.transfer is None:
-        raise HTTPException(503, "Transfer nicht verfügbar (libtorrent nicht installiert)")
+        raise HTTPException(503, t("err.transfer_unavailable"))
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     tracker = s.get_content_tracker()
     try:
@@ -738,10 +739,10 @@ async def repair_game(game_id: str, req: UpdateRequest) -> DownloadOut:
     and download whatever is missing or broken."""
     s = app_state.get()
     if s.transfer is None:
-        raise HTTPException(503, "Transfer nicht verfügbar (libtorrent nicht installiert)")
+        raise HTTPException(503, t("err.transfer_unavailable"))
     g = s.library.get(game_id)
     if not g:
-        raise HTTPException(404, "Spiel nicht gefunden")
+        raise HTTPException(404, t("err.game_not_found"))
 
     tracker = s.get_content_tracker()
     try:
@@ -771,10 +772,10 @@ async def _update_game(
         # Without old hashes start_update lets libtorrent check the files once.
         stopped = await asyncio.to_thread(tracker.cancel_hash, game_id)
         if not stopped:
-            raise HTTPException(409, "Hash-Berechnung ließ sich nicht abbrechen")
+            raise HTTPException(409, t("err.hash_cancel_failed"))
         g = s.library.get(game_id) or g
     elif state == "publishing":
-        raise HTTPException(409, f"Spiel ist gerade beschäftigt ({state})")
+        raise HTTPException(409, t("err.game_busy", state=state))
     # "updating" is fine: start_update replaces the running update (the host
     # may have published a newer version or rebuilt the torrent meanwhile).
     # No scan here any more: the update's piece check does a fresh stat()
@@ -783,11 +784,11 @@ async def _update_game(
 
     peers = s.peer_registry.peers_for_version(game_id, req.version_key)
     if not peers:
-        raise HTTPException(404, f"Version {req.version_key} nicht gefunden oder kein Peer online")
+        raise HTTPException(404, t("err.version_no_peer", version=req.version_key))
     if req.peer_id:
         chosen = [p for p in peers if p.peer_id == req.peer_id]
         if not chosen:
-            raise HTTPException(404, "Gewählter Peer bietet diese Version nicht (mehr) an")
+            raise HTTPException(404, t("err.peer_version_gone"))
         peers = chosen + [p for p in peers if p.peer_id != req.peer_id]
 
     primary = peers[0]
@@ -796,7 +797,7 @@ async def _update_game(
         _fetch_peer_torrent, primary.address, primary.port, game_id
     )
     if manifest is None or torrent_bytes is None:
-        raise HTTPException(502, "Manifest oder Torrent-Datei vom Peer nicht abrufbar")
+        raise HTTPException(502, t("err.peer_files_unavailable"))
 
     try:
         # Returns right away: local prep + reading existing pieces run in the
@@ -815,11 +816,11 @@ async def _update_game(
     except UpdateAlreadyRunning as exc:
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(500, f"Update konnte nicht gestartet werden: {exc}") from exc
+        raise HTTPException(500, t("err.update_start_failed", error=exc)) from exc
 
     status = s.transfer.get_status(download_id)
     if status is None:
-        raise HTTPException(500, "Update gestartet, aber Status nicht verfügbar")
+        raise HTTPException(500, t("err.update_no_status"))
     return _to_out(status)
 
 

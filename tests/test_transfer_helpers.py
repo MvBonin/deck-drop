@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock
 
+from deckdrop.core.i18n import t
 from deckdrop.network.transfer import (
     _bytes_complete,
     _friendly_transfer_error,
@@ -55,8 +56,8 @@ def test_torrent_is_complete():
 
 def test_transfer_error_hint_hash():
     msg = _friendly_transfer_error("piece hash check failed")
-    assert "Prüfsumme" in msg or "fehl" in msg.lower()
-    assert "Host" in _transfer_error_hint(msg)
+    assert msg == t("transfer.hash_failed")
+    assert _transfer_error_hint(msg) == t("hint.check_host_files")
 
 
 def test_pieces_from_status_none():

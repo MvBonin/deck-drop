@@ -18,7 +18,9 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 from deckdrop.api.websocket import broadcast
+from deckdrop.core import i18n
 from deckdrop.core.config import Config
+from deckdrop.core.i18n import t
 from deckdrop.network import resume as resume_mod
 
 log = logging.getLogger(__name__)
@@ -166,38 +168,57 @@ def _lt():
         raise RuntimeError("libtorrent is not installed. Install it with: pip install libtorrent")
 
 
+# Raw libtorrent error substring → message key (core.i18n).
 _TRANSFER_ERROR_PATTERNS: list[tuple[str, str]] = [
-    ("no such file", "Dateipfad nicht gefunden."),
-    ("filesystem", "Dateipfad nicht gefunden."),
-    ("timed out", "Zeitüberschreitung – Host erreichbar?"),
-    ("timeout", "Zeitüberschreitung – Host erreichbar?"),
-    ("connection refused", "Verbindung abgelehnt – Torrent-Port 7374 prüfen."),
-    ("parse_magnet_uri", "Magnet-Link konnte nicht gelesen werden."),
-    ("does not match c++ signature", "libtorrent-API inkompatibel – App aktualisieren."),
-    ("hash", "Prüfsumme fehlgeschlagen – Datei beschädigt oder unvollständig."),
-    ("piece", "Datenblock fehlerhaft – Download unvollständig."),
-    ("no space", "Nicht genug Speicherplatz."),
-    ("disk", "Festplattenfehler beim Schreiben."),
-    ("0 peers", "Kein Peer verbunden."),
-    ("no peers", "Kein Peer verbunden."),
+    ("no such file", "transfer.path_not_found"),
+    ("filesystem", "transfer.path_not_found"),
+    ("timed out", "transfer.timeout"),
+    ("timeout", "transfer.timeout"),
+    ("connection refused", "transfer.refused"),
+    ("parse_magnet_uri", "transfer.bad_magnet"),
+    ("does not match c++ signature", "transfer.lt_incompatible"),
+    ("hash", "transfer.hash_failed"),
+    ("piece", "transfer.piece_failed"),
+    ("no space", "transfer.no_space"),
+    ("disk", "transfer.disk_error"),
+    ("0 peers", "transfer.no_peers"),
+    ("no peers", "transfer.no_peers"),
 ]
 
-_TRANSFER_ERROR_HINTS: list[tuple[str, str]] = [
-    ("keine verbindung zum host", "Host einschalten, DeckDrop dort starten, Port 7374 freigeben."),
-    ("liefert keine torrent-daten", "Am Host das Spiel neu freigeben, dann „Erneut“."),
-    ("keine daten vom host", "Host online lassen; der Download verbindet sich selbst neu."),
-    ("hash", "Erneut versuchen; Host-Dateien prüfen."),
-    ("piece", "Erneut versuchen; Host-Dateien prüfen."),
-    ("no space", "Speicherplatz freigeben, dann „Erneut“."),
-    ("disk", "Speicherplatz und Berechtigungen prüfen."),
-    ("no peers", "Host online lassen und erneut versuchen."),
-    ("0 peers", "Host online lassen und erneut versuchen."),
-    ("timed out", "Host erreichbar? Kurz warten und „Erneut“."),
-    ("timeout", "Host erreichbar? Kurz warten und „Erneut“."),
-    ("connection refused", "Firewall: Torrent-Port 7374 am Host prüfen."),
-    ("no such file", "Download entfernen und neu starten."),
-    ("filesystem", "Download entfernen und neu starten."),
+# (message key of an error we produced, raw libtorrent substrings) → hint key.
+# Errors are stored already translated, so our own messages are recognised
+# via i18n.matches() in every language, raw libtorrent text via substrings.
+_TRANSFER_ERROR_HINTS: list[tuple[str | None, tuple[str, ...], str]] = [
+    ("transfer.no_host_connection", (), "hint.no_connection"),
+    ("transfer.no_metadata", (), "hint.no_metadata"),
+    ("transfer.midstall", (), "hint.no_data"),
+    ("transfer.hash_failed", ("hash",), "hint.check_host_files"),
+    ("transfer.piece_failed", ("piece",), "hint.check_host_files"),
+    ("transfer.no_space", ("no space",), "hint.free_space"),
+    ("transfer.disk_error", ("disk",), "hint.disk"),
+    ("transfer.no_peers", ("no peers", "0 peers"), "hint.keep_host_online"),
+    ("transfer.timeout", ("timed out", "timeout"), "hint.timeout"),
+    ("transfer.refused", ("connection refused",), "hint.firewall"),
+    ("transfer.path_not_found", ("no such file", "filesystem"), "hint.restart_download"),
 ]
+
+
+def _friendly_transfer_error(raw: str) -> str:
+    lower = raw.lower()
+    for needle, key in _TRANSFER_ERROR_PATTERNS:
+        if needle in lower:
+            return t(key)
+    if len(raw) > 120:
+        return raw[:117] + "…"
+    return raw
+
+
+def _transfer_error_hint(message: str) -> str:
+    lower = message.lower()
+    for key, needles, hint in _TRANSFER_ERROR_HINTS:
+        if (key and i18n.matches(message, key)) or any(n in lower for n in needles):
+            return t(hint)
+    return t("hint.default")
 
 
 def _parse_magnet_params(lt: object, magnet: str, save_path: str) -> object:
@@ -209,24 +230,6 @@ def _parse_magnet_params(lt: object, magnet: str, save_path: str) -> object:
         lt.parse_magnet_uri(magnet, params)  # type: ignore[misc]
     params.save_path = save_path
     return params
-
-
-def _friendly_transfer_error(raw: str) -> str:
-    lower = raw.lower()
-    for needle, msg in _TRANSFER_ERROR_PATTERNS:
-        if needle in lower:
-            return msg
-    if len(raw) > 120:
-        return raw[:117] + "…"
-    return raw
-
-
-def _transfer_error_hint(message: str) -> str:
-    lower = message.lower()
-    for needle, hint in _TRANSFER_ERROR_HINTS:
-        if needle in lower:
-            return hint
-    return "„Erneut“ versuchen oder Host-Verbindung prüfen."
 
 
 # Near-complete stall: reconnect peer and surface error after this long without progress.
@@ -737,7 +740,7 @@ class TransferManager:
             running = self.active_update_for(game.id)
             if running is not None:
                 if running.info_hash and running.info_hash == info_hash and not repair:
-                    raise UpdateAlreadyRunning("Dieses Update läuft bereits.")
+                    raise UpdateAlreadyRunning(t("err.update_already_running"))
                 stale_files = self._replace_running_update(running, target_version_label)
 
             rec = _PersistedRecord(
@@ -1104,7 +1107,7 @@ class TransferManager:
                 reason,
                 game_id,
                 changed_rels,
-                detail=f"fehlgeschlagen, libtorrent prüft selbst: {exc}",
+                detail=t("debug.detail.fast_path_failed", error=exc),
             )
 
     @staticmethod
@@ -1758,7 +1761,10 @@ class TransferManager:
             debuglog.record("manifest_check", "manifest_mismatch", h.game_id, bad)
         else:
             debuglog.record(
-                "manifest_check", "manifest_ok", h.game_id, detail=f"{len(files)} Dateien"
+                "manifest_check",
+                "manifest_ok",
+                h.game_id,
+                detail=t("debug.detail.manifest_ok", count=len(files)),
             )
         return bad
 
@@ -2270,14 +2276,11 @@ class TransferManager:
 
         if now - waiting_since >= _METADATA_ERROR_AFTER:
             if status.num_peers > 0:
-                message = (
-                    "Host liefert keine Torrent-Daten – am Host das Spiel neu "
-                    "freigeben (Torrent neu erstellen), dann „Erneut“."
-                )
+                message = t("transfer.no_metadata")
             else:
-                message = (
-                    f"Keine Verbindung zum Host ({address or 'unbekannt'}). Läuft DeckDrop "
-                    "dort und ist Port 7374 offen? „Erneut“ versuchen."
+                message = t(
+                    "transfer.no_host_connection",
+                    address=address or t("transfer.unknown_address"),
                 )
             self._set_recoverable_error(rec, message)
 
@@ -2316,8 +2319,7 @@ class TransferManager:
                 if rec:
                     self._set_recoverable_error(
                         rec,
-                        "Seit 5 Minuten keine Daten vom Host – Host prüfen, "
-                        "der Download versucht es weiter.",
+                        t("transfer.midstall"),
                     )
             return
 
@@ -2327,15 +2329,9 @@ class TransferManager:
             rec = self._paused.get(did)
             if rec and not rec.error:
                 if status.num_peers > 0 and status.pieces_missing > 0:
-                    message = (
-                        "Host liefert letzte Daten nicht – auf dem Host Torrent neu "
-                        "erstellen (Metadaten geändert?). „Erneut“ versuchen."
-                    )
+                    message = t("transfer.endgame_missing")
                 else:
-                    message = (
-                        "Download hängt bei den letzten Daten – "
-                        "Host erreichbar und online? „Erneut“ versuchen."
-                    )
+                    message = t("transfer.endgame_stall")
                 self._set_recoverable_error(rec, message)
             return
 
@@ -2593,7 +2589,7 @@ class TransferManager:
                 {
                     "id": status.id,
                     "game_id": status.game_id,
-                    "error": status.error or "Unbekannter Übertragungsfehler.",
+                    "error": status.error or t("transfer.unknown"),
                     "error_hint": status.error_hint,
                     "status": "error",
                     "progress": status.progress,
