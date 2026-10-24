@@ -171,6 +171,7 @@ def test_repair_uses_chosen_peer_and_repair_mode(app_with_hashing_game, monkeypa
     a = SimpleNamespace(peer_id="deck2", name="Deck 2", address="192.168.1.6", port=7373)
     b = SimpleNamespace(peer_id="pc", name="PC", address="192.168.1.5", port=7373)
     app_state.get().peer_registry.peers_for_version.return_value = [a, b]
+    info.origin.peer_id = "pc"  # downloaded copy – own games can't be repaired
 
     r = client.post(f"/api/games/{info.id}/repair", json={"version_key": "v1", "peer_id": "pc"})
 
@@ -181,3 +182,12 @@ def test_repair_uses_chosen_peer_and_repair_mode(app_with_hashing_game, monkeypa
 
     r = client.post(f"/api/games/{info.id}/repair", json={"version_key": "v1", "peer_id": "nope"})
     assert r.status_code == 404
+
+
+def test_repair_rejected_for_own_game(app_with_hashing_game):
+    client, info, _tracker, transfer = app_with_hashing_game
+
+    r = client.post(f"/api/games/{info.id}/repair", json={"version_key": "v1"})
+
+    assert r.status_code == 409
+    transfer.start_update.assert_not_called()

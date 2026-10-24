@@ -169,6 +169,8 @@ def test_repair_dialog_offers_version_and_source(page: Page, live_server_url: st
         "content_state": "clean",
         "revision": 2,
         "version_label": "1.0.5",
+        "local_share": False,
+        "source_peer_name": "MVB Desktop",
     }
     updates = {
         "current": {
@@ -202,6 +204,28 @@ def test_repair_dialog_offers_version_and_source(page: Page, live_server_url: st
     expect(dialog.get_by_text("1.0.5").first).to_be_visible(timeout=10_000)
     expect(dialog.get_by_label("Source")).to_have_value("pc")
     expect(dialog.get_by_role("button", name="Repair", exact=True)).to_be_enabled()
+
+
+def test_repair_hidden_for_own_game(page: Page, live_server_url: str) -> None:
+    game = {
+        "id": "own1",
+        "name": "Homebrew",
+        "version": 1,
+        "size_bytes": 1024,
+        "platform": "linux",
+        "available": True,
+        "added_by": "E2EUser",
+        "updated_at": "2026-09-26T00:00:00+00:00",
+        "has_torrent": True,
+        "content_state": "clean",
+        "local_share": True,
+    }
+    page.route("**/api/games", lambda route: route.fulfill(json=[game]))
+    page.goto(live_server_url, wait_until="domcontentloaded")
+
+    card = page.get_by_role("article", name="Homebrew")
+    expect(card).to_be_visible(timeout=10_000)
+    expect(card.get_by_role("button", name="Repair game")).to_have_count(0)
 
 
 def test_settings_update_check_and_lan_offer(page: Page, live_server_url: str) -> None:
