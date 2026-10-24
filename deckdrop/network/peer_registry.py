@@ -21,6 +21,9 @@ from deckdrop.core.comments import Comment, load_comments, merge_comments, save_
 log = logging.getLogger(__name__)
 
 GAME_FETCH_TIMEOUT = 3.0  # seconds
+# /api/games reloads the host's library from disk; while the host hashes a
+# game its disk is saturated and the answer can take well over 3 s.
+GAME_LIST_TIMEOUT = 10.0  # seconds
 GAMES_REFRESH_INTERVAL = 30.0  # seconds – poll peer game lists
 GAMES_REFRESH_FAST = 3.0  # while any peer game is not ready to share
 
@@ -223,29 +226,34 @@ class PeerRegistry:
         is_new_peer: bool = False,
     ) -> None:
         url = _peer_http_url(address, port, "/api/games")
+        games: list[dict] | None = None
         try:
-            async with httpx.AsyncClient(timeout=GAME_FETCH_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=GAME_LIST_TIMEOUT) as client:
                 r = await client.get(url)
                 r.raise_for_status()
                 games = r.json()
         except Exception as exc:
             log.warning("Could not fetch games from %s:%s – %s", address, port, exc)
-            games = []
             # First contact often races mDNS/API – retry once quickly
             if is_new_peer:
                 await asyncio.sleep(0.5)
                 try:
-                    async with httpx.AsyncClient(timeout=GAME_FETCH_TIMEOUT) as client:
+                    async with httpx.AsyncClient(timeout=GAME_LIST_TIMEOUT) as client:
                         r = await client.get(url)
                         r.raise_for_status()
                         games = r.json()
                 except Exception as retry_exc:
                     log.warning("Game fetch retry failed for %s:%s – %s", address, port, retry_exc)
-                    games = []
 
         entry = self._peers.get(peer_id)
         if not entry:
             return
+        if games is None:
+            if not is_new_peer:
+                # A slow answer (host busy hashing) is not an empty library:
+                # keep the last known list instead of hiding every game.
+                return
+            games = []
 
         entry.app_offer = await self._fetch_app_offer(address, port)
         changed = self._games_changed(entry.games, games)
