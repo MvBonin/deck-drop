@@ -22,6 +22,7 @@ from typing import Any
 
 from deckdrop.core import content, debuglog, integrity
 from deckdrop.core import game as game_mod
+from deckdrop.core.i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -612,7 +613,7 @@ class ContentTracker:
                 "publish",
                 game_id,
                 rehashed,
-                detail=f"{len(files) - len(rehashed)} Datei(en) ohne Rehash übernommen",
+                detail=t("debug.detail.reused", count=len(files) - len(rehashed)),
             )
             new_hash = content.compute_content_hash(files, sizes)
             if new_hash and new_hash == g.content.content_hash and ignore == g.content.ignore:

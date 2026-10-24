@@ -46,3 +46,13 @@ def test_deep_merge_keeps_new_defaults(tmp_path, monkeypatch):
     cfg = cfg_mod.load()
     # Should fall back to defaults for missing keys
     assert cfg.seed_after_download is True
+
+
+def test_config_without_language_loads_as_english(tmp_path, monkeypatch):
+    """Players from before the language setting get English."""
+    path = tmp_path / "config.toml"
+    path.write_text('[user]\nname = "old"\npeer_id = "p1"\nonboarding_complete = true\n')
+    monkeypatch.setattr(cfg_mod, "CONFIG_PATH", path)
+    cfg = cfg_mod.load()
+    assert cfg.onboarding_complete is True
+    assert cfg.language == "en"

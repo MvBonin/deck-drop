@@ -2,6 +2,7 @@ import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
+import { t } from '../i18n/index.js';
 
 export function PublishUpdate({ game, onClose, onPublished }) {
   const [versionLabel, setVersionLabel] = useState(game.version_label || '');
@@ -69,16 +70,16 @@ export function PublishUpdate({ game, onClose, onPublished }) {
   const removed = changes?.removed || [];
   const added = changes?.added || [];
   const summaryText = loadingChanges
-    ? 'Änderungen werden ermittelt…'
-    : `${changed.length} geändert · ${added.length} neu · ${removed.length} entfernt`;
+    ? t('publish.detecting')
+    : t('publish.summary', { changed: changed.length, added: added.length, removed: removed.length });
 
   return html`
-    <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="Update veröffentlichen">
+    <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label=${t('publish.title')}>
       <div class="dialog">
-        <div class="dialog-title">Update veröffentlichen – ${game.name}</div>
+        <div class="dialog-title">${t('publish.titleFor', { name: game.name })}</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
-          Aktuell: ${game.version_label || `Rev. ${game.revision ?? 1}`}
-          ${game.created_by && html` · erstellt von ${game.created_by}`}
+          ${t('publish.current', { version: game.version_label || `Rev. ${game.revision ?? 1}` })}
+          ${game.created_by && t('publish.createdBy', { name: game.created_by })}
         </div>
 
         <form onSubmit=${submit} style="display:flex;flex-direction:column;gap:14px">
@@ -90,7 +91,7 @@ export function PublishUpdate({ game, onClose, onPublished }) {
                 class="btn btn-ghost"
                 style="align-self:flex-start;padding:4px 8px;font-size:12px;margin-top:4px"
                 onClick=${() => setShowDetails(s => !s)}
-              >${showDetails ? 'Details ▲' : 'Details ▾'}</button>
+              >${t('publish.details')} ${showDetails ? '▲' : '▾'}</button>
             `}
             ${showDetails && html`
               <div style="max-height:200px;overflow-y:auto;font-size:12px;margin-top:6px;display:flex;flex-direction:column;gap:4px">
@@ -112,7 +113,7 @@ export function PublishUpdate({ game, onClose, onPublished }) {
                 `)}
                 ${added.length > 0 && html`
                   <div style="font-size:11px;color:var(--text-dim);margin-top:2px">
-                    Abgewählt = lokale Datei, nicht teilen (z. B. Spielstände).
+                    ${t('publish.unchecked')}
                   </div>
                 `}
               </div>
@@ -120,7 +121,7 @@ export function PublishUpdate({ game, onClose, onPublished }) {
           </div>
 
           <div class="form-group">
-            <label class="form-label">Version</label>
+            <label class="form-label">${t('publish.version')}</label>
             <input
               ref=${firstRef}
               class="form-input"
@@ -133,11 +134,11 @@ export function PublishUpdate({ game, onClose, onPublished }) {
           </div>
 
           <div class="form-group">
-            <label class="form-label">Notiz (optional)</label>
+            <label class="form-label">${t('publish.note')}</label>
             <textarea
               class="form-input"
               rows="2"
-              placeholder="Patch 1.6.8, Crash-Fix"
+              placeholder=${t('publish.notePlaceholder')}
               value=${note}
               onInput=${e => setNote(e.target.value)}
               disabled=${submitting}
@@ -148,9 +149,9 @@ export function PublishUpdate({ game, onClose, onPublished }) {
           ${error && html`<p style="color:var(--danger);font-size:13px">${error}</p>`}
 
           <div class="dialog-actions">
-            <button type="button" class="btn btn-ghost" onClick=${onClose} disabled=${submitting}>Abbrechen</button>
+            <button type="button" class="btn btn-ghost" onClick=${onClose} disabled=${submitting}>${t('common.cancel')}</button>
             <button type="submit" class="btn btn-primary" disabled=${submitting || loadingChanges}>
-              ${submitting ? html`<span class="spinner"></span>` : 'Veröffentlichen'}
+              ${submitting ? html`<span class="spinner"></span>` : t('publish.submit')}
             </button>
           </div>
         </form>

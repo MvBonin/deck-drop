@@ -2,15 +2,16 @@ import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
+import { t, getLocale } from '../i18n/index.js';
 
 const INSTALL_HINT = {
-  flatpak: 'Flatpak: neue Version von der Download-Seite installieren.',
-  pipx: 'pipx: pipx install --force git+https://github.com/MvBonin/deck-drop@v',
-  windows: 'Windows: neue Version von der Download-Seite herunterladen.',
+  flatpak: () => t('appUpdate.hintFlatpak'),
+  pipx: () => 'pipx: pipx install --force git+https://github.com/MvBonin/deck-drop@v',
+  windows: () => t('appUpdate.hintWindows'),
 };
 
 function fmtDate(iso) {
-  try { return iso ? new Date(iso).toLocaleDateString('de-DE') : ''; } catch { return ''; }
+  try { return iso ? new Date(iso).toLocaleDateString(getLocale()) : ''; } catch { return ''; }
 }
 
 /** Waits until the restarted server answers again, then reloads the page. */
@@ -58,16 +59,16 @@ export function AppUpdate({ title, showToast }) {
   }, [st?.install?.state]);
 
   const check = async () => {
-    if (!confirm('Achtung: Dafür wird eine Anfrage an GitHub (api.github.com) gesendet. Fortfahren?')) return;
+    if (!confirm(t('appUpdate.githubWarning'))) return;
     setChecking(true);
     try {
       const s = await api.checkSelfUpdate();
       setSt(s);
       const gh = s.github || {};
-      if (gh.ok === false) showToast(gh.error || 'Prüfen fehlgeschlagen');
-      else if (!gh.newer) showToast(gh.message || 'DeckDrop ist aktuell');
+      if (gh.ok === false) showToast(gh.error || t('appUpdate.checkFailed'));
+      else if (!gh.newer) showToast(gh.message || t('appUpdate.upToDate'));
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'settings')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'settings') }));
     } finally {
       setChecking(false);
     }
@@ -78,20 +79,20 @@ export function AppUpdate({ title, showToast }) {
     try {
       setSt(await api.installSelfUpdate(source));
     } catch (err) {
-      showToast(`Update nicht möglich: ${formatApiError(err, 'settings')}`);
+      showToast(t('appUpdate.installFailed', { error: formatApiError(err, 'settings') }));
     } finally {
       setBusy(false);
     }
   };
 
   const restart = async (rollback = false) => {
-    if (rollback && !confirm('Zur vorherigen DeckDrop-Version zurückkehren und neu starten?')) return;
+    if (rollback && !confirm(t('appUpdate.rollbackConfirm'))) return;
     setRestarting(true);
     try {
       if (rollback) await api.rollbackSelfUpdate();
       else await api.restartSelfUpdate();
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'settings')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'settings') }));
       setRestarting(false);
       return;
     }
@@ -116,28 +117,28 @@ export function AppUpdate({ title, showToast }) {
       <div class="app-version">
         <div>
           <div class="settings-row-label">DeckDrop ${st.current}</div>
-          <div class="settings-row-sub">Suche fragt GitHub an</div>
+          <div class="settings-row-sub">${t('appUpdate.searchAsksGithub')}</div>
         </div>
         <button type="button" class="btn btn-secondary" style="padding:6px 12px;font-size:13px"
           onClick=${check} disabled=${checking || installing}>
-          ${checking ? html`<span class="spinner"></span>` : 'Nach Updates suchen'}
+          ${checking ? html`<span class="spinner"></span>` : t('appUpdate.check')}
         </button>
       </div>
     `)}
     ${hasDetails && html`
-    <p class="settings-section-title">DeckDrop-Version</p>
+    <p class="settings-section-title">${t('appUpdate.section')}</p>
     <div class="settings-section">
 
       ${lan.map(o => html`
         <div class="settings-row" key=${o.peer_id}>
           <div>
-            <div class="settings-row-label">Neuere Version ${o.version} im Netzwerk gefunden</div>
-            <div class="settings-row-sub">bei ${o.peer_name}${o.size ? ` · ${fmtBytes(o.size)}` : ''} · signiert</div>
+            <div class="settings-row-label">${t('appUpdate.lanFound', { version: o.version })}</div>
+            <div class="settings-row-sub">${t('appUpdate.lanFrom', { peer: o.peer_name })}${o.size ? ` · ${fmtBytes(o.size)}` : ''} · ${t('appUpdate.signed')}</div>
           </div>
           ${st.can_self_update && html`
             <button type="button" class="btn btn-primary" style="padding:6px 12px;font-size:13px"
               onClick=${() => install(o.peer_id)} disabled=${busy || installing || inst.state === 'ready'}>
-              Von ${o.peer_name} aktualisieren
+              ${t('appUpdate.updateFrom', { peer: o.peer_name })}
             </button>`}
         </div>
       `)}
@@ -145,31 +146,31 @@ export function AppUpdate({ title, showToast }) {
       ${gh && gh.newer && html`
         <div class="settings-row" style="flex-wrap:wrap">
           <div style="flex:1;min-width:200px">
-            <div class="settings-row-label">Version ${gh.latest} verfügbar</div>
+            <div class="settings-row-label">${t('appUpdate.available', { version: gh.latest })}</div>
             <div class="settings-row-sub">
               ${fmtDate(gh.published_at)}
-              ${gh.verified ? ' · Signatur geprüft' : ''}
+              ${gh.verified ? ` · ${t('appUpdate.signatureChecked')}` : ''}
               ${gh.error ? html` · <span style="color:var(--danger)">${gh.error}</span>` : ''}
             </div>
             ${gh.notes && html`
               <button type="button" class="debug-link" onClick=${() => setShowNotes(v => !v)}>
-                ${showNotes ? 'Änderungen ausblenden' : 'Änderungen anzeigen'}
+                ${showNotes ? t('appUpdate.hideNotes') : t('appUpdate.showNotes')}
               </button>
               ${showNotes && html`<pre class="update-notes">${gh.notes}</pre>`}
             `}
             ${!st.can_self_update && html`
               <div class="settings-row-sub" style="margin-top:4px">
-                ${INSTALL_HINT[st.install_type] || st.self_update_hint}${st.install_type === 'pipx' ? gh.latest : ''}
+                ${INSTALL_HINT[st.install_type]?.() || st.self_update_hint}${st.install_type === 'pipx' ? gh.latest : ''}
               </div>`}
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             ${st.can_self_update && gh.verified && html`
               <button type="button" class="btn btn-primary" style="padding:6px 12px;font-size:13px"
                 onClick=${() => install('github')} disabled=${busy || installing || inst.state === 'ready'}>
-                Jetzt aktualisieren
+                ${t('appUpdate.updateNow')}
               </button>`}
             <a class="btn btn-ghost" style="padding:6px 12px;font-size:13px" href=${gh.html_url}
-              target="_blank" rel="noopener noreferrer">Download-Seite</a>
+              target="_blank" rel="noopener noreferrer">${t('appUpdate.downloadPage')}</a>
           </div>
         </div>
       `}
@@ -177,7 +178,7 @@ export function AppUpdate({ title, showToast }) {
       ${installing && html`
         <div class="settings-row" style="display:block">
           <div class="settings-row-sub" style="margin-bottom:6px">
-            ${inst.state === 'verifying' ? 'Prüfe Signatur und Prüfsumme…' : `Lade ${inst.version} von ${inst.source}… ${pct} %`}
+            ${inst.state === 'verifying' ? t('appUpdate.verifying') : t('appUpdate.downloading', { version: inst.version, source: inst.source, pct })}
           </div>
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
         </div>
@@ -187,23 +188,23 @@ export function AppUpdate({ title, showToast }) {
       `}
       ${inst.state === 'ready' && html`
         <div class="settings-row">
-          <div class="settings-row-label">Update installiert – Neustart nötig</div>
+          <div class="settings-row-label">${t('appUpdate.installed')}</div>
           <button type="button" class="btn btn-primary" style="padding:6px 12px;font-size:13px"
-            onClick=${() => restart(false)} disabled=${restarting}>Neu starten</button>
+            onClick=${() => restart(false)} disabled=${restarting}>${t('appUpdate.restart')}</button>
         </div>
       `}
       ${st.rollback_available && inst.state !== 'ready' && html`
         <div class="settings-row">
-          <div class="settings-row-sub">Vorherige Version ist noch vorhanden</div>
+          <div class="settings-row-sub">${t('appUpdate.previousAvailable')}</div>
           <button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:12px"
-            onClick=${() => restart(true)} disabled=${restarting || installing}>Vorherige Version wiederherstellen</button>
+            onClick=${() => restart(true)} disabled=${restarting || installing}>${t('appUpdate.rollback')}</button>
         </div>
       `}
     </div>`}
     ${restarting && html`
-      <div class="overlay" role="dialog" aria-modal="true" aria-label="Neustart">
+      <div class="overlay" role="dialog" aria-modal="true" aria-label=${t('appUpdate.restart')}>
         <div class="dialog" style="text-align:center">
-          <div class="dialog-title">DeckDrop startet neu…</div>
+          <div class="dialog-title">${t('appUpdate.restarting')}</div>
           <div class="spinner" style="margin:16px auto"></div>
         </div>
       </div>

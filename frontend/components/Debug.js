@@ -1,13 +1,14 @@
 import { html } from 'htm/preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
+import { t, getLocale } from '../i18n/index.js';
 
 const POLL_MS = 3000;
 
 function fmtTime(ts) {
   if (!ts) return '–';
   const d = new Date(ts * 1000);
-  return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return d.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function HashEvent({ ev, gameName }) {
@@ -19,7 +20,7 @@ function HashEvent({ ev, gameName }) {
         <span class="debug-time">${fmtTime(ev.ts)}</span>
         <span class=${'debug-kind debug-kind-' + ev.kind}>${ev.kind}</span>
         <span class="debug-game">${gameName || ev.game_id || '–'}</span>
-        <span class="debug-count">${ev.file_count} Datei${ev.file_count === 1 ? '' : 'en'}</span>
+        <span class="debug-count">${t('debug.files', { count: ev.file_count })}</span>
       </div>
       <div class="debug-reason">
         ${ev.reason_text}
@@ -28,13 +29,13 @@ function HashEvent({ ev, gameName }) {
       </div>
       ${hasFiles && html`
         <button type="button" class="debug-link" onClick=${() => setOpen(o => !o)}>
-          ${open ? 'Dateien ausblenden' : 'Dateien anzeigen'}
+          ${open ? t('debug.hideFiles') : t('debug.showFiles')}
         </button>
       `}
       ${open && html`
         <ul class="debug-files">
           ${ev.files.map(f => html`<li key=${f}><code>${f}</code></li>`)}
-          ${ev.file_count > ev.files.length && html`<li>… und ${ev.file_count - ev.files.length} weitere</li>`}
+          ${ev.file_count > ev.files.length && html`<li>${t('debug.more', { count: ev.file_count - ev.files.length })}</li>`}
         </ul>
       `}
     </div>`;
@@ -62,8 +63,8 @@ export function Debug({ wsEvent }) {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, POLL_MS);
-    return () => clearInterval(t);
+    const timer = setInterval(load, POLL_MS);
+    return () => clearInterval(timer);
   }, [load]);
 
   useEffect(() => {
@@ -74,9 +75,9 @@ export function Debug({ wsEvent }) {
   if (!data) {
     return html`
       <div class="view">
-        <div class="view-header"><div class="view-title">Debug</div></div>
+        <div class="view-header"><div class="view-title">${t('debug.title')}</div></div>
         ${error
-          ? html`<p class="debug-empty">Fehler: ${error}</p>`
+          ? html`<p class="debug-empty">${t('common.error', { error })}</p>`
           : html`<div class="empty-state"><div class="spinner"></div></div>`}
       </div>`;
   }
@@ -89,25 +90,25 @@ export function Debug({ wsEvent }) {
     <div class="view">
       <div class="view-header">
         <div>
-          <div class="view-title">Debug</div>
+          <div class="view-title">${t('debug.title')}</div>
           <div class="view-subtitle">DeckDrop ${data.version} · Peer ${String(data.peer_id).slice(0, 8)}…</div>
         </div>
         <select class="form-input debug-filter" value=${gameId} onChange=${e => setGameId(e.target.value)}>
-          <option value="">Alle Spiele</option>
+          <option value="">${t('debug.allGames')}</option>
           ${gameId && !names[gameId] ? html`<option value=${gameId}>${gameId}</option>` : null}
           ${allGames.map(g => html`<option key=${g.id} value=${g.id}>${g.name}</option>`)}
         </select>
       </div>
-      ${error && html`<p class="debug-empty">Aktualisieren fehlgeschlagen: ${error}</p>`}
+      ${error && html`<p class="debug-empty">${t('debug.refreshFailed', { error })}</p>`}
 
-      <p class="settings-section-title">Hash-Ereignisse (warum wird gehasht?)</p>
+      <p class="settings-section-title">${t('debug.hashEvents')}</p>
       <div class="settings-section debug-section">
         ${data.hash_events.length === 0
-          ? html`<p class="debug-empty">Seit dem Start wurde nichts gehasht oder neu geprüft.</p>`
+          ? html`<p class="debug-empty">${t('debug.noHashEvents')}</p>`
           : data.hash_events.map(ev => html`<${HashEvent} key=${ev.id} ev=${ev} gameName=${names[ev.game_id]} />`)}
       </div>
 
-      <p class="settings-section-title">Spiele</p>
+      <p class="settings-section-title">${t('debug.games')}</p>
       <div class="settings-section debug-section">
         ${data.games.map(g => html`
           <div class="debug-game-row" key=${g.id}>
@@ -117,70 +118,69 @@ export function Debug({ wsEvent }) {
             </div>
             <div class="debug-kv">
               <span>ID</span><code>${g.id}</code>
-              <span>Revision</span><code>${g.revision}${g.version_label ? ` (${g.version_label})` : ''}</code>
-              <span>Datei-Hashes</span><code>${g.has_file_hashes ? `${g.file_count} Dateien` : 'keine'}</code>
+              <span>${t('debug.revision')}</span><code>${g.revision}${g.version_label ? ` (${g.version_label})` : ''}</code>
+              <span>${t('debug.fileHashes')}</span><code>${g.has_file_hashes ? t('debug.files', { count: g.file_count }) : t('debug.none')}</code>
               <span>content_hash</span><code>${g.content_hash || '–'}</code>
               <span>info_hash</span><code>${g.info_hash || '–'}</code>
-              <span>Herkunft</span><code>${g.origin_peer || 'lokal'}</code>
+              <span>${t('debug.origin')}</span><code>${g.origin_peer || t('debug.local')}</code>
               ${g.content.pending_hash_reason && html`
-                <span>Nächster Rehash</span>
+                <span>${t('debug.nextRehash')}</span>
                 <code>${g.content.pending_hash_reason_text} (${g.content.pending_hash_reason})</code>
               `}
               ${g.content.hash_progress != null && html`
-                <span>Fortschritt</span><code>${Math.round(g.content.hash_progress * 100)} %</code>
+                <span>${t('debug.progress')}</span><code>${Math.round(g.content.hash_progress * 100)} %</code>
               `}
               ${g.content.summary && html`
-                <span>Änderungen</span>
-                <code>${g.content.summary.changed} geändert · ${g.content.summary.removed} entfernt · ${g.content.summary.added} neu</code>
+                <span>${t('debug.changes')}</span>
+                <code>${t('debug.changesSummary', g.content.summary)}</code>
               `}
-              <span>Letzter Scan</span><code>${fmtTime(g.content.last_scan)}</code>
+              <span>${t('debug.lastScan')}</span><code>${fmtTime(g.content.last_scan)}</code>
               ${g.network && html`
-                <span>Im Netzwerk</span>
+                <span>${t('debug.inNetwork')}</span>
                 <code>${g.network.same_id
-                  ? `${g.network.same_id} Version(en) mit gleicher ID`
-                  : 'keine Version mit gleicher ID'}${g.network.best_update
-                  ? ` · Update: ${g.network.best_update.version_label || `Rev. ${g.network.best_update.revision}`}`
+                  ? t('debug.sameId', { count: g.network.same_id })
+                  : t('debug.noSameId')}${g.network.best_update
+                  ? t('debug.updateTo', { version: g.network.best_update.version_label || `Rev. ${g.network.best_update.revision}` })
                   : ''}</code>
               `}
             </div>
             ${g.network && g.network.name_matches.length > 0 && !g.network.same_id && html`
               <p class="debug-warn">
-                Gleichnamiges Spiel mit anderer ID im Netzwerk (${g.network.name_matches.join(', ')}) –
-                wird nicht als Update erkannt, sondern als neuer Download angeboten.
+                ${t('debug.nameMatch', { names: g.network.name_matches.join(', ') })}
               </p>
             `}
           </div>
         `)}
       </div>
 
-      <p class="settings-section-title">Netzwerk</p>
+      <p class="settings-section-title">${t('debug.network')}</p>
       <div class="settings-section debug-section">
         ${(data.network_games || []).length === 0
-          ? html`<p class="debug-empty">Keine Spiele von anderen Peers.</p>`
+          ? html`<p class="debug-empty">${t('debug.noNetworkGames')}</p>`
           : data.network_games.map(n => html`
             <div class="debug-game-row" key=${n.id + n.version_key}>
               <div class="debug-event-head">
                 <strong>${n.name}</strong>
                 <span class="debug-kind">${n.version_label || `Rev. ${n.revision}`}</span>
                 ${n.installed
-                  ? html`<span class="debug-kind debug-state-clean">installiert</span>`
-                  : html`<span class="debug-kind">nicht installiert</span>`}
+                  ? html`<span class="debug-kind debug-state-clean">${t('debug.installed')}</span>`
+                  : html`<span class="debug-kind">${t('debug.notInstalled')}</span>`}
                 ${n.update_available && html`<span class="debug-kind debug-kind-piece_check">Update</span>`}
               </div>
               <div class="debug-kv">
                 <span>ID</span><code>${n.id}</code>
-                <span>Peers</span><code>${n.peers.join(', ') || '–'}</code>
-                <span>Teilbar</span><code>${n.shareable ? 'ja' : 'nein'} · Torrent ${n.has_torrent ? 'ja' : 'nein'}</code>
-                <span>Größe</span><code>${fmtBytes(n.size_bytes)}</code>
+                <span>${t('debug.peers')}</span><code>${n.peers.join(', ') || '–'}</code>
+                <span>${t('debug.shareable')}</span><code>${n.shareable ? t('debug.yes') : t('debug.no')} · Torrent ${n.has_torrent ? t('debug.yes') : t('debug.no')}</code>
+                <span>${t('debug.size')}</span><code>${fmtBytes(n.size_bytes)}</code>
               </div>
             </div>
           `)}
       </div>
 
-      <p class="settings-section-title">Downloads</p>
+      <p class="settings-section-title">${t('debug.downloads')}</p>
       <div class="settings-section debug-section">
         ${data.downloads.length === 0
-          ? html`<p class="debug-empty">Keine aktiven Downloads.</p>`
+          ? html`<p class="debug-empty">${t('debug.noDownloads')}</p>`
           : data.downloads.map(d => html`
             <div class="debug-game-row" key=${d.id}>
               <div class="debug-event-head">
@@ -189,9 +189,9 @@ export function Debug({ wsEvent }) {
                 <span class="debug-kind">${d.status}${d.phase ? ` / ${d.phase}` : ''}</span>
               </div>
               <div class="debug-kv">
-                <span>Fortschritt</span><code>${Math.round((d.progress || 0) * 100)} % · ${fmtBytes(d.downloaded_bytes)} / ${fmtBytes(d.total_bytes)}</code>
-                <span>Peers</span><code>${d.num_peers}</code>
-                ${d.error && html`<span>Fehler</span><code>${d.error}</code>`}
+                <span>${t('debug.progress')}</span><code>${Math.round((d.progress || 0) * 100)} % · ${fmtBytes(d.downloaded_bytes)} / ${fmtBytes(d.total_bytes)}</code>
+                <span>${t('debug.peers')}</span><code>${d.num_peers}</code>
+                ${d.error && html`<span>${t('debug.error')}</span><code>${d.error}</code>`}
               </div>
             </div>
           `)}
@@ -199,7 +199,7 @@ export function Debug({ wsEvent }) {
 
       <div style="padding:4px 20px 20px">
         <button type="button" class="btn btn-ghost" onClick=${() => setShowRaw(r => !r)}>
-          ${showRaw ? 'Roh-JSON ausblenden' : 'Roh-JSON anzeigen'}
+          ${showRaw ? t('debug.hideRaw') : t('debug.showRaw')}
         </button>
         ${showRaw && html`<pre class="debug-raw">${JSON.stringify(data, null, 2)}</pre>`}
       </div>

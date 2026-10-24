@@ -108,7 +108,7 @@ def test_shutdown_gives_up_within_the_time_budget(transfer, caplog):
     elapsed = time.monotonic() - started
 
     assert elapsed < 1.5
-    assert any("Resume-Daten" in r.message for r in caplog.records)
+    assert any("Resume data" in r.message for r in caplog.records)
 
 
 def test_shutdown_is_idempotent(transfer):

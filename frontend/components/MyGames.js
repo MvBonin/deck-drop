@@ -10,6 +10,7 @@ import { PublishUpdate } from './PublishUpdate.js';
 import { UpdateGame } from './UpdateGame.js';
 import { RepairGame } from './RepairGame.js';
 import { useGridNav } from '../app.js';
+import { t } from '../i18n/index.js';
 
 export function MyGames({ wsEvent, showToast }) {
   const [games, setGames]       = useState([]);
@@ -78,15 +79,15 @@ export function MyGames({ wsEvent, showToast }) {
       setGames(gs => gs.map(g => g.id === id
         ? { ...g, has_torrent: true, torrent_preparing: false, torrent_prep_progress: null, torrent_prep_error: null }
         : g));
-      showToast('Spiel ist bereit zum Teilen');
+      showToast(t('myGames.readyToShare'));
     }
     if (wsEvent.event === 'torrent_prep_error') {
       setPrepById(p => { const n = { ...p }; delete n[id]; return n; });
-      const err = wsEvent.data.error || 'Unbekannter Fehler';
+      const err = wsEvent.data.error || t('common.unknownError');
       setGames(gs => gs.map(g => g.id === id
         ? { ...g, torrent_preparing: false, torrent_prep_error: err }
         : g));
-      showToast(`Game-Hashes fehlgeschlagen: ${err}`);
+      showToast(t('myGames.hashFailed', { error: err }));
     }
     if (wsEvent.event === 'game_content_state') {
       const { state, summary } = wsEvent.data;
@@ -117,15 +118,15 @@ export function MyGames({ wsEvent, showToast }) {
           : g));
       }
       if (!wsEvent.data.unchanged) {
-        showToast(`Update ${wsEvent.data.version_label || ''} veröffentlicht`.trim());
+        showToast(t('myGames.updatePublished', { version: wsEvent.data.version_label || '' }).replace(/\s+/g, ' '));
       } else if (wsEvent.data.label_updated) {
-        showToast(`Version ${wsEvent.data.version_label || ''} gespeichert`.trim());
+        showToast(t('myGames.versionSaved', { version: wsEvent.data.version_label || '' }).replace(/\s+/g, ' '));
       }
       load();
     }
     if (wsEvent.event === 'content_publish_error') {
       setPrepById(p => { const n = { ...p }; delete n[id]; return n; });
-      showToast(`Veröffentlichen fehlgeschlagen: ${wsEvent.data.error || 'Unbekannter Fehler'}`);
+      showToast(t('myGames.publishFailed', { error: wsEvent.data.error || t('common.unknownError') }));
       load();
     }
     if (wsEvent.event === 'download_progress') {
@@ -142,7 +143,7 @@ export function MyGames({ wsEvent, showToast }) {
     }
     if (wsEvent.event === 'game_updated') {
       setUpdateProgress(p => { const n = { ...p }; delete n[id]; return n; });
-      showToast(`Update ${wsEvent.data.version_label || ''} übernommen`.trim());
+      showToast(t('myGames.updateApplied', { version: wsEvent.data.version_label || '' }).replace(/\s+/g, ' '));
       load();
     }
   }, [wsEvent]);
@@ -153,32 +154,32 @@ export function MyGames({ wsEvent, showToast }) {
       g.torrent_preparing || g.content_state === 'hashing' || g.content_state === 'publishing'
     );
     if (!needsPoll) return;
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
   }, [games]);
 
   const onAdded = (game) => {
     setGames(g => [...g, { ...game, torrent_preparing: !game.has_torrent, torrent_prep_progress: 0 }]);
     if (!game.has_torrent) setPrepById(p => ({ ...p, [game.id]: 0 }));
     setShowAdd(false);
-    showToast(`„${game.name}" hinzugefügt – Game-Hashes werden berechnet…`);
+    showToast(t('myGames.added', { name: game.name }));
   };
 
   const onRemove = async (game) => {
-    if (!confirm(`„${game.name}" aus DeckDrop entfernen? Dateien bleiben erhalten.`)) return;
+    if (!confirm(t('myGames.removeConfirm', { name: game.name }))) return;
     try {
       await api.removeGame(game.id);
       setGames(g => g.filter(x => x.id !== game.id));
-      showToast(`„${game.name}" entfernt`);
+      showToast(t('myGames.removed', { name: game.name }));
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'game')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'game') }));
     }
   };
 
   const onSaved = (updated) => {
     setGames(gs => gs.map(g => g.id === updated.id ? updated : g));
     setEditGame(null);
-    showToast(`„${updated.name}" gespeichert`);
+    showToast(t('myGames.saved', { name: updated.name }));
   };
 
   const onGameUpdated = (updated) => {
@@ -187,12 +188,12 @@ export function MyGames({ wsEvent, showToast }) {
   };
 
   const onRestore = async (game) => {
-    if (!confirm(`Lokale Änderungen an „${game.name}" verwerfen und aus dem Netzwerk wiederherstellen?`)) return;
+    if (!confirm(t('myGames.restoreConfirm', { name: game.name }))) return;
     try {
       await api.startUpdate(game.id, game.content_hash);
-      showToast('Wird aus dem Netzwerk wiederhergestellt…');
+      showToast(t('myGames.restoring'));
     } catch (err) {
-      showToast(`Fehler: ${formatApiError(err, 'game')}`);
+      showToast(t('common.error', { error: formatApiError(err, 'game') }));
     }
   };
 
@@ -200,8 +201,8 @@ export function MyGames({ wsEvent, showToast }) {
     <div class="view">
       <div class="view-header">
         <div>
-          <div class="view-title">Meine Spiele</div>
-          <div class="view-subtitle">${games.length} Spiel${games.length !== 1 ? 'e' : ''} geteilt</div>
+          <div class="view-title">${t('myGames.title')}</div>
+          <div class="view-subtitle">${t('myGames.shared', { count: games.length })}</div>
         </div>
       </div>
 
@@ -210,8 +211,8 @@ export function MyGames({ wsEvent, showToast }) {
         : games.length === 0
           ? html`<div class="empty-state">
               <div class="empty-icon">🎮</div>
-              <div class="empty-title">Noch keine Spiele</div>
-              <div class="empty-sub">Füge deinen ersten Spielordner hinzu, um ihn im LAN zu teilen.</div>
+              <div class="empty-title">${t('myGames.emptyTitle')}</div>
+              <div class="empty-sub">${t('myGames.emptySub')}</div>
             </div>`
           : html`<div class="card-grid" ref=${gridRef} role="list">
               ${games.map(g => html`
@@ -236,8 +237,8 @@ export function MyGames({ wsEvent, showToast }) {
       <button
         class="fab"
         onClick=${() => setShowAdd(true)}
-        title="Spiel hinzufügen"
-        aria-label="Spiel hinzufügen"
+        title=${t('myGames.add')}
+        aria-label=${t('myGames.add')}
       >+</button>
 
       ${showAdd && html`<${AddGame} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
@@ -247,21 +248,21 @@ export function MyGames({ wsEvent, showToast }) {
         <${PublishUpdate}
           game=${publishGame}
           onClose=${() => setPublishGame(null)}
-          onPublished=${() => { setPublishGame(null); showToast('Update wird vorbereitet…'); }}
+          onPublished=${() => { setPublishGame(null); showToast(t('myGames.updatePreparing')); }}
         />
       `}
       ${repairGame && html`
         <${RepairGame}
           game=${repairGame}
           onClose=${() => setRepairGame(null)}
-          onStarted=${() => { setRepairGame(null); showToast('Reparatur gestartet – Fortschritt unter „Downloads“'); load(); }}
+          onStarted=${() => { setRepairGame(null); showToast(t('myGames.repairStarted')); load(); }}
         />
       `}
       ${updateGame && html`
         <${UpdateGame}
           game=${updateGame}
           onClose=${() => setUpdateGame(null)}
-          onStarted=${() => { setUpdateGame(null); showToast('Update gestartet – Fortschritt unter „Downloads“'); load(); }}
+          onStarted=${() => { setUpdateGame(null); showToast(t('myGames.updateStarted')); load(); }}
         />
       `}
     </div>`;

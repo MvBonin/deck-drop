@@ -16,6 +16,7 @@ from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
 from deckdrop.api.websocket import broadcast
 from deckdrop.core import game as game_mod
+from deckdrop.core.i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def _fetch_magnet_from_peer(address: str, port: int, game_id: str) -> str:
         try:
             r = httpx.get(url, timeout=_MAGNET_REQUEST_TIMEOUT)
             if r.status_code == 409:
-                last_detail = r.text or "Torrent wird vorbereitet"
+                last_detail = r.text or t("err.torrent_preparing")
                 time.sleep(_MAGNET_PREP_POLL)
                 continue
             r.raise_for_status()
@@ -83,15 +84,14 @@ def _fetch_magnet_from_peer(address: str, port: int, game_id: str) -> str:
             detail = exc.response.text if exc.response is not None else str(exc)
             raise HTTPException(
                 502,
-                f"Magnet-Link vom Host nicht abrufbar (HTTP {exc.response.status_code}): {detail}",
+                t("err.magnet_http", status=exc.response.status_code, detail=detail),
             ) from exc
         except Exception as exc:
-            raise HTTPException(502, f"Magnet-Link vom Host nicht abrufbar: {exc}") from exc
+            raise HTTPException(502, t("err.magnet_fetch", error=exc)) from exc
 
     raise HTTPException(
         502,
-        "Magnet-Link: Host braucht zu lange für Torrent-Vorbereitung. "
-        f"Am Host warten und erneut versuchen. ({last_detail})",
+        t("err.magnet_timeout", detail=last_detail),
     )
 
 
@@ -136,14 +136,14 @@ def _to_out(status: object) -> DownloadOut:
 def _get_transfer_or_503():
     s = app_state.get()
     if s.transfer is None:
-        raise HTTPException(503, "Transfer nicht verfügbar (libtorrent nicht installiert)")
+        raise HTTPException(503, t("err.transfer_unavailable"))
     return s
 
 
 def _status_or_404(transfer: object, download_id: str) -> DownloadOut:
     status = transfer.get_status(download_id)
     if status is None:
-        raise HTTPException(404, "Download nicht gefunden")
+        raise HTTPException(404, t("err.download_not_found"))
     return _to_out(status)
 
 
@@ -152,15 +152,17 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
     s = _get_transfer_or_503()
 
     if s.library.get(req.game_id) is not None:
-        raise HTTPException(409, "Spiel ist schon installiert – Update verwenden.")
+        raise HTTPException(409, t("err.already_installed"))
 
     peer = s.peer_registry.get(req.peer_id)
     if not peer:
-        raise HTTPException(404, f"Peer {req.peer_id} nicht gefunden")
+        raise HTTPException(404, t("err.peer_id_not_found", peer_id=req.peer_id))
 
     game = next((g for g in peer.games if g["id"] == req.game_id), None)
     if not game:
-        raise HTTPException(404, f"Spiel {req.game_id} beim Peer {req.peer_id} nicht gefunden")
+        raise HTTPException(
+            404, t("err.peer_game_id_not_found", game_id=req.game_id, peer_id=req.peer_id)
+        )
 
     # Which peer(s) actually serve the requested version. Without a
     # version_key (old clients / recommended version) it's just `peer`.
@@ -173,7 +175,7 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
     if req.version_key is not None:
         version_peers = s.peer_registry.peers_for_version(req.game_id, req.version_key)
         if not version_peers:
-            raise HTTPException(404, f"Version {req.version_key} nicht gefunden")
+            raise HTTPException(404, t("err.version_not_found", version=req.version_key))
         chosen_peer = version_peers[0]
         extra_peer_ids = [p.peer_id for p in version_peers[1:]]
         game = next((g for g in chosen_peer.games if g["id"] == req.game_id), game)
@@ -220,7 +222,7 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
             except HTTPException:
                 raise
             except Exception as exc:
-                raise HTTPException(502, f"Magnet-Link vom Host nicht abrufbar: {exc}") from exc
+                raise HTTPException(502, t("err.magnet_fetch", error=exc)) from exc
 
         try:
             download_id = s.transfer.start_download(
@@ -237,7 +239,7 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
                 expected_content_hash=expected_content_hash,
             )
         except Exception as exc:
-            raise HTTPException(500, f"Download konnte nicht gestartet werden: {exc}") from exc
+            raise HTTPException(500, t("err.download_start_failed", error=exc)) from exc
 
         out = _status_or_404(s.transfer, download_id)
         if out.status in ("queued", "downloading", "verifying", "paused", "error"):
@@ -260,7 +262,7 @@ def list_downloads() -> list[DownloadOut]:
 def pause_download(download_id: str) -> DownloadOut:
     s = _get_transfer_or_503()
     if not s.transfer.pause_download(download_id):
-        raise HTTPException(404, "Download nicht gefunden")
+        raise HTTPException(404, t("err.download_not_found"))
     return _status_or_404(s.transfer, download_id)
 
 
@@ -268,7 +270,7 @@ def pause_download(download_id: str) -> DownloadOut:
 def resume_download(download_id: str) -> DownloadOut:
     s = _get_transfer_or_503()
     if not s.transfer.resume_download(download_id):
-        raise HTTPException(404, "Download nicht gefunden oder konnte nicht fortgesetzt werden")
+        raise HTTPException(404, t("err.download_resume_failed"))
     return _status_or_404(s.transfer, download_id)
 
 
@@ -276,15 +278,15 @@ def resume_download(download_id: str) -> DownloadOut:
 def retry_download(download_id: str) -> DownloadOut:
     s = _get_transfer_or_503()
     if not s.transfer.retry_download(download_id):
-        raise HTTPException(404, "Download nicht gefunden oder Wiederholung fehlgeschlagen")
+        raise HTTPException(404, t("err.download_retry_failed"))
     return _status_or_404(s.transfer, download_id)
 
 
 @router.delete("/downloads/{download_id}", status_code=204)
 def remove_download(
     download_id: str,
-    delete_files: bool = Query(False, description="Spielordner auf der Festplatte löschen"),
+    delete_files: bool = Query(False, description="Delete the game folder on disk"),
 ) -> None:
     s = _get_transfer_or_503()
     if not s.transfer.remove_download(download_id, delete_files=delete_files):
-        raise HTTPException(404, "Download nicht gefunden")
+        raise HTTPException(404, t("err.download_not_found"))

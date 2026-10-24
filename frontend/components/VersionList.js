@@ -1,10 +1,11 @@
 import { html } from 'htm/preact';
 import { fmtBytes } from '../api.js';
+import { t, getLocale } from '../i18n/index.js';
 
 function fmtDate(iso) {
   if (!iso) return '';
   try {
-    return new Date(iso).toLocaleDateString('de-DE');
+    return new Date(iso).toLocaleDateString(getLocale());
   } catch {
     return '';
   }
@@ -23,15 +24,15 @@ export function VersionList({ versions, value, onChange }) {
   if (!versions || versions.length === 0) return null;
 
   return html`
-    <div role="radiogroup" aria-label="Version wählen" style="display:flex;flex-direction:column;gap:8px">
+    <div role="radiogroup" aria-label=${t('versions.choose')} style="display:flex;flex-direction:column;gap:8px">
       ${versions.map((v, i) => {
         const label = v.version_label || `Rev. ${v.revision}`;
         const disabled = !v.shareable || !v.has_torrent;
         const selected = value === v.version_key;
         const peerNames = (v.peers || []).map(p => p.peer_name).join(', ');
-        const byLine = [v.content_updated_by || v.created_by, fmtDate(v.content_updated_at)]
-          .filter(Boolean)
-          .join(' am ');
+        const by = v.content_updated_by || v.created_by;
+        const date = fmtDate(v.content_updated_at);
+        const byLine = by && date ? t('versions.byOn', { by, date }) : (by || date);
         const borderColor = selected ? 'var(--accent)' : 'var(--surface-3)';
         return html`
           <label
@@ -51,11 +52,11 @@ export function VersionList({ versions, value, onChange }) {
               <div style="display:flex;align-items:center;gap:6px;font-weight:600">
                 <span>${label}</span>
                 <span style="font-weight:400;color:var(--text-dim);font-size:12px">· Rev. ${v.revision}</span>
-                ${i === 0 && !disabled && html`<span class="badge badge-success">Neueste</span>`}
+                ${i === 0 && !disabled && html`<span class="badge badge-success">${t('versions.latest')}</span>`}
               </div>
               <div style="font-size:12px;color:var(--text-dim);margin-top:2px">
-                ${byLine ? html`von ${byLine}` : ''}
-                ${peerNames ? html` · bei ${peerNames}` : ''}
+                ${byLine ? t('versions.by', { who: byLine }) : ''}
+                ${peerNames ? t('versions.at', { peers: peerNames }) : ''}
                 ${v.size_bytes ? html` · ${fmtBytes(v.size_bytes)}` : ''}
               </div>
               ${v.version_note && html`
@@ -63,7 +64,7 @@ export function VersionList({ versions, value, onChange }) {
               `}
               ${disabled && html`
                 <div style="font-size:11px;color:var(--danger);margin-top:4px">
-                  Nicht teilbar${v.content_updated_by ? ` – bei ${v.content_updated_by} verändert, noch nicht veröffentlicht` : ''}
+                  ${t('versions.notShareable')}${v.content_updated_by ? t('versions.modifiedBy', { name: v.content_updated_by }) : ''}
                 </div>
               `}
             </div>

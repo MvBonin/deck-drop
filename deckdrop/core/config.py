@@ -19,6 +19,8 @@ _DEFAULTS: dict[str, Any] = {
         "name": "",
         "peer_id": "",
         "onboarding_complete": False,
+        # UI language; configs from before this setting load as English
+        "language": "en",
     },
     "paths": {
         "download_dir": str(Path.home() / "Games" / "DeckDrop-Games"),
@@ -74,6 +76,14 @@ class Config:
     @onboarding_complete.setter
     def onboarding_complete(self, value: bool) -> None:
         self._data["user"]["onboarding_complete"] = value
+
+    @property
+    def language(self) -> str:
+        return self._data["user"]["language"]
+
+    @language.setter
+    def language(self, value: str) -> None:
+        self._data["user"]["language"] = value
 
     # -- paths --
 

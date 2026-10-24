@@ -115,7 +115,7 @@ def test_metadata_wait_escalates_to_an_actionable_error(transfer):
     with patch.object(transfer, "_registry_peer_address", return_value=""):
         transfer._nudge_metadata(h, status)
     assert rec.error is not None
-    assert "Keine Verbindung zum Host" in rec.error
+    assert "No connection to host" in rec.error
     assert rec.error_recoverable is True
 
 
@@ -136,7 +136,7 @@ def test_metadata_error_names_the_host_when_peers_are_present(transfer):
     transfer._meta_wait_since["d1"] = time.monotonic() - (transfer_mod._METADATA_ERROR_AFTER + 1)
     with patch.object(transfer, "_registry_peer_address", return_value=""):
         transfer._nudge_metadata(h, status)
-    assert "liefert keine Torrent-Daten" in (rec.error or "")
+    assert "not sending torrent data" in (rec.error or "")
 
 
 def test_metadata_wait_resets_once_metadata_arrives(transfer):
@@ -152,7 +152,7 @@ def test_mid_download_stall_reports_after_five_minutes(transfer):
     transfer._last_downloaded["d1"] = 80_000_000
     transfer._last_progress_at["d1"] = time.monotonic() - (transfer_mod._MIDSTALL_ERROR_AFTER + 1)
     transfer._nudge_stalled_download(h, _status(num_peers=1))
-    assert "keine Daten vom Host" in (rec.error or "")
+    assert "No data from host" in (rec.error or "")
     assert rec.error_recoverable is True
 
 

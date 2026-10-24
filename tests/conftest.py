@@ -17,6 +17,7 @@ from deckdrop.api import state as app_state
 from deckdrop.api.server import create_app
 from deckdrop.core import config as cfg_mod
 from deckdrop.core import game as game_mod
+from deckdrop.core import i18n
 from deckdrop.core.library import Library
 
 
@@ -24,6 +25,13 @@ from deckdrop.core.library import Library
 def _allow_testclient_as_local(monkeypatch):
     """Make Starlette's TestClient host ('testclient') pass the local_only check."""
     monkeypatch.setattr(deps_mod, "_LOCAL_HOSTS", deps_mod._LOCAL_HOSTS | {"testclient"})
+
+
+@pytest.fixture(autouse=True)
+def _reset_language():
+    """The server language is process-global; a test switching it must not leak."""
+    yield
+    i18n.set_language(i18n.DEFAULT_LANGUAGE)
 
 
 @pytest.fixture

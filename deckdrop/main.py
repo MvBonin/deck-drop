@@ -193,9 +193,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
         if migrated:
             import logging
 
-            logging.getLogger(__name__).info(
-                "Veraltete Torrent-Caches migriert: %d Spiel(e)", migrated
-            )
+            logging.getLogger(__name__).info("Migrated stale torrent caches: %d game(s)", migrated)
 
         restored = torrent_prep.restore_all_cached(library, cfg, transfer)
         if restored:
@@ -276,7 +274,7 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
     if selfupdate.restart_requested():
         remove_pid_file(cfg_mod.CONFIG_PATH)
-        print("DeckDrop startet neu…")
+        print("DeckDrop is restarting…")
         selfupdate.exec_restart(sys.argv)
 
 

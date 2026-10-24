@@ -1,3 +1,5 @@
+import { t } from './i18n/index.js';
+
 /**
  * Parse FastAPI error body (JSON {"detail": "..."} or plain text).
  */
@@ -22,44 +24,35 @@ export function parseFastApiDetail(body) {
 
 const DOWNLOAD_BY_STATUS = {
   404: (detail) => {
-    if (/peer/i.test(detail)) {
-      return 'Peer nicht mehr im Netzwerk – Netzwerk-Tab aktualisieren.';
-    }
-    if (/game/i.test(detail) || /spiel/i.test(detail)) {
-      return 'Spiel beim Host nicht mehr gefunden.';
-    }
-    return detail || 'Spiel oder Peer nicht gefunden.';
+    if (/peer/i.test(detail)) return t('errors.peerGone');
+    if (/game/i.test(detail) || /spiel/i.test(detail)) return t('errors.hostGameGone');
+    return detail || t('errors.gameOrPeerNotFound');
   },
-  409: () =>
-    'Der Host berechnet noch Game-Hashes – kurz warten und erneut versuchen.',
+  409: () => t('errors.hostHashing'),
   502: (detail) => {
-    const base = 'Host nicht erreichbar (Magnet-Link). Firewall prüfen: Port 7373.';
+    const base = t('errors.hostUnreachable');
     return detail ? `${base} (${detail})` : base;
   },
   503: (detail) => {
-    if (/libtorrent/i.test(detail)) {
-      return 'Transfer nicht verfügbar – libtorrent fehlt auf diesem Gerät.';
-    }
-    return detail || 'Dienst vorübergehend nicht verfügbar (libtorrent).';
+    if (/libtorrent/i.test(detail)) return t('errors.noLibtorrent');
+    return detail || t('errors.serviceUnavailable');
   },
   500: (detail) => {
-    if (!detail || /^internal server error$/i.test(detail)) {
-      return 'Interner Serverfehler – DeckDrop-Log prüfen oder App neu starten.';
-    }
-    return `Download konnte nicht gestartet werden: ${detail}`;
+    if (!detail || /^internal server error$/i.test(detail)) return t('errors.internal');
+    return t('errors.downloadNotStarted', { detail });
   },
 };
 
 const SETTINGS_BY_STATUS = {
-  403: () => 'Nur von diesem Gerät aus erreichbar.',
-  503: (detail) => detail || 'Einstellungen konnten nicht gespeichert werden.',
+  403: () => t('errors.localOnly'),
+  503: (detail) => detail || t('errors.settingsNotSaved'),
 };
 
 const GAME_BY_STATUS = {
-  400: (detail) => detail || 'Ungültiger Pfad oder Ordner.',
-  404: () => 'Spiel nicht gefunden.',
-  422: (detail) => detail || 'Bitte alle Pflichtfelder ausfüllen.',
-  500: (detail) => detail || 'Spiel konnte nicht gespeichert werden.',
+  400: (detail) => detail || t('errors.invalidPath'),
+  404: () => t('errors.gameNotFound'),
+  422: (detail) => detail || t('errors.requiredFields'),
+  500: (detail) => detail || t('errors.gameNotSaved'),
 };
 
 const CONTEXT_MAP = {
@@ -69,61 +62,61 @@ const CONTEXT_MAP = {
 };
 
 /**
- * Turn a failed api.req() error into a short German user message.
+ * Turn a failed api.req() error into a short user message (current language).
+ * Server details already come translated (deckdrop/core/i18n.py).
  */
 export function formatApiError(err, context = 'download') {
   if (!err || !err.status) {
-    return 'Keine Verbindung zur DeckDrop-API.';
+    return t('errors.noApi');
   }
   const detail = parseFastApiDetail(err.body);
   const byStatus = CONTEXT_MAP[context] || DOWNLOAD_BY_STATUS;
   const mapper = byStatus[err.status];
   if (mapper) return mapper(detail);
-  return detail || `Fehler (HTTP ${err.status}).`;
+  return detail || t('errors.http', { status: err.status });
 }
 
+// Raw libtorrent text → message key. Errors the server produced itself are
+// already translated and pass through unchanged.
 const TRANSFER_PATTERNS = [
-  [/no such file|filesystem/i, 'Dateipfad nicht gefunden.'],
-  [/timed out|timeout/i, 'Zeitüberschreitung – Host erreichbar?'],
-  [/connection refused/i, 'Verbindung abgelehnt – Torrent-Port 7374 prüfen.'],
-  [/parse_magnet_uri/i, 'Magnet-Link ungültig oder libtorrent-Version inkompatibel.'],
-  [/0 peers|no peers|num_peers.*0/i, 'Kein Peer verbunden – Host seedet möglicherweise nicht.'],
+  [/no such file|filesystem/i, 'errors.transfer.pathNotFound'],
+  [/timed out|timeout/i, 'errors.transfer.timeout'],
+  [/connection refused/i, 'errors.transfer.refused'],
+  [/parse_magnet_uri/i, 'errors.transfer.badMagnet'],
+  [/0 peers|no peers|num_peers.*0/i, 'errors.transfer.noPeers'],
 ];
 
 /**
- * Friendly German text for libtorrent / transfer runtime errors.
+ * Friendly text for libtorrent / transfer runtime errors.
  */
 export function formatTransferError(raw) {
-  if (!raw || typeof raw !== 'string') return 'Unbekannter Übertragungsfehler.';
+  if (!raw || typeof raw !== 'string') return t('errors.transfer.unknown');
   const lower = raw.toLowerCase();
-  for (const [re, msg] of TRANSFER_PATTERNS) {
-    if (re.test(lower)) return msg;
+  for (const [re, key] of TRANSFER_PATTERNS) {
+    if (re.test(lower)) return t(key);
   }
   if (raw.length > 120) return `${raw.slice(0, 117)}…`;
   return raw;
 }
 
+// Fallback only: the server sends `error_hint` (translated) with every error.
 const TRANSFER_HINT_PATTERNS = [
-  [/keine verbindung zum host/i, 'Host einschalten, DeckDrop dort starten, Port 7374 freigeben.'],
-  [/liefert keine torrent-daten/i, 'Am Host das Spiel neu freigeben, dann „Erneut“.'],
-  [/keine daten vom host/i, 'Host online lassen; der Download verbindet sich selbst neu.'],
-  [/hash|piece/i, 'Erneut versuchen; Host-Dateien prüfen.'],
-  [/no space|disk/i, 'Speicherplatz freigeben, dann „Erneut“.'],
-  [/0 peers|no peers/i, 'Host online lassen und erneut versuchen.'],
-  [/timed out|timeout/i, 'Host erreichbar? Kurz warten und „Erneut“.'],
-  [/connection refused/i, 'Firewall: Torrent-Port 7374 am Host prüfen.'],
-  [/no such file|filesystem/i, 'Download entfernen und neu starten.'],
+  [/hash|piece/i, 'errors.hint.checkHostFiles'],
+  [/no space|disk/i, 'errors.hint.freeSpace'],
+  [/0 peers|no peers/i, 'errors.hint.keepHostOnline'],
+  [/timed out|timeout/i, 'errors.hint.timeout'],
+  [/connection refused/i, 'errors.hint.firewall'],
+  [/no such file|filesystem/i, 'errors.hint.restartDownload'],
 ];
 
 /**
- * Actionable hint for a transfer error (API error_hint or derived from message).
+ * Actionable hint for a transfer error (API error_hint or derived from the raw message).
  */
 export function getTransferHint(dl) {
   if (dl?.error_hint) return dl.error_hint;
-  const msg = formatTransferError(dl?.error || '');
-  const lower = msg.toLowerCase();
-  for (const [re, hint] of TRANSFER_HINT_PATTERNS) {
-    if (re.test(lower)) return hint;
+  const lower = (dl?.error || '').toLowerCase();
+  for (const [re, key] of TRANSFER_HINT_PATTERNS) {
+    if (re.test(lower)) return t(key);
   }
-  return '„Erneut“ versuchen oder Host-Verbindung prüfen.';
+  return t('errors.hint.default');
 }

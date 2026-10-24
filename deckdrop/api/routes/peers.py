@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from deckdrop.api import state as app_state
 from deckdrop.api.deps import local_only
 from deckdrop.api.routes.games import CommentOut
+from deckdrop.core.i18n import t
 
 router = APIRouter(tags=["peers"], dependencies=[Depends(local_only)])
 
@@ -56,7 +57,7 @@ def get_peer_games(peer_id: str) -> list[dict]:
     registry = app_state.get().peer_registry
     entry = registry.get(peer_id)
     if not entry:
-        raise HTTPException(404, "Peer not found")
+        raise HTTPException(404, t("err.peer_not_found"))
     return entry.games
 
 
@@ -75,9 +76,9 @@ def get_peer_game_comments(peer_id: str, game_id: str) -> list[CommentOut]:
     registry = app_state.get().peer_registry
     entry = registry.get(peer_id)
     if not entry or not entry.online:
-        raise HTTPException(404, "Peer nicht gefunden")
+        raise HTTPException(404, t("err.peer_not_found"))
     if not any(g.get("id") == game_id for g in entry.games):
-        raise HTTPException(404, "Spiel beim Peer nicht gefunden")
+        raise HTTPException(404, t("err.peer_game_not_found"))
 
     url = _peer_http_url(entry.address, entry.port, f"/api/games/{game_id}/comments")
     try:
@@ -88,10 +89,10 @@ def get_peer_game_comments(peer_id: str, game_id: str) -> list[CommentOut]:
         detail = exc.response.text if exc.response is not None else str(exc)
         raise HTTPException(
             502,
-            f"Kommentare vom Peer nicht abrufbar (HTTP {exc.response.status_code}): {detail}",
+            t("err.comments_http", status=exc.response.status_code, detail=detail),
         ) from exc
     except Exception as exc:
-        raise HTTPException(502, f"Kommentare vom Peer nicht abrufbar: {exc}") from exc
+        raise HTTPException(502, t("err.comments_fetch", error=exc)) from exc
 
 
 @router.get("/peers/{peer_id}/games/{game_id}/cover")
@@ -100,9 +101,9 @@ def get_peer_game_cover(peer_id: str, game_id: str) -> Response:
     registry = app_state.get().peer_registry
     entry = registry.get(peer_id)
     if not entry or not entry.online:
-        raise HTTPException(404, "Peer nicht gefunden")
+        raise HTTPException(404, t("err.peer_not_found"))
     if not any(g.get("id") == game_id for g in entry.games):
-        raise HTTPException(404, "Spiel beim Peer nicht gefunden")
+        raise HTTPException(404, t("err.peer_game_not_found"))
 
     url = _peer_http_url(entry.address, entry.port, f"/api/games/{game_id}/cover")
     try:
@@ -110,9 +111,9 @@ def get_peer_game_cover(peer_id: str, game_id: str) -> Response:
         r.raise_for_status()
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code if exc.response is not None else 502
-        raise HTTPException(404 if status == 404 else 502, "Kein Cover beim Peer") from exc
+        raise HTTPException(404 if status == 404 else 502, t("err.no_peer_cover")) from exc
     except Exception as exc:
-        raise HTTPException(502, f"Cover vom Peer nicht abrufbar: {exc}") from exc
+        raise HTTPException(502, t("err.cover_fetch", error=exc)) from exc
 
     media_type = r.headers.get("content-type", "image/jpeg")
     return Response(content=r.content, media_type=media_type)

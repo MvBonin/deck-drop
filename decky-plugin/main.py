@@ -94,6 +94,8 @@ class Plugin:
             "service_active": _systemctl("is-active", _SERVICE),
             "api_reachable": bool(api_info),
             "version": api_info.get("version", ""),
+            # UI language chosen in DeckDrop; "" while the API is unreachable
+            "language": api_info.get("language", ""),
             "url": _DECKDROP_URL,
         }
 

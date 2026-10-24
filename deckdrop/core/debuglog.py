@@ -16,52 +16,22 @@ from collections import deque
 from collections.abc import Iterable
 from typing import Any
 
+from deckdrop.core.i18n import t
+
 log = logging.getLogger(__name__)
 
 MAX_EVENTS = 300
 MAX_FILES_PER_EVENT = 50
 
-# kind: what reads the files
-KIND_TEXT: dict[str, str] = {
-    "blake2b": "DeckDrop hasht Dateien (blake2b)",
-    "piece_check": "Lokale Pieces prüfen (SHA1)",
-    "recheck": "libtorrent prüft Dateien neu",
-    "manifest_check": "Manifest ↔ Torrent abgleichen (ohne Lesen)",
-    "torrent_build": "Torrent erstellen (liest alle Dateien)",
-    "relink": "Spiel-ID an den Host angeglichen (Legacy-Download)",
-    "update": "Update",
-}
+# Human-readable texts for `kind` (what reads the files) and `reason` (why)
+# live in core.i18n as debug.kind.<kind> / debug.reason.<reason>.
 
-# reason: why it happens
-REASON_TEXT: dict[str, str] = {
-    "new_local_game": "Neues lokales Spiel – noch keine Datei-Hashes",
-    "download_without_manifest": (
-        "Download ohne Manifest (alter Peer oder Manifest-Abruf fehlgeschlagen)"
-    ),
-    "manifest_mismatch": "Manifest passt nicht zum Torrent – Hashes werden lokal neu berechnet",
-    "manifest_ok": "Manifest passt zum Torrent – kein Rehash nötig",
-    "mtime_changed": "Änderungszeit geändert, Größe gleich – Inhalt wird geprüft",
-    "publish": "Update veröffentlichen – geänderte Dateien werden gehasht",
-    "update_reuse_local": (
-        "Update: vorhandene Bytes geänderter/verschobener Dateien wiederverwenden"
-    ),
-    "update_without_baseline": (
-        "Update ohne alte Datei-Hashes – vorhandene Dateien werden einmal pieceweise geprüft"
-    ),
-    "update_started": "Nachgeholt: Hash war für ein Update abgebrochen worden",
-    "interrupted": "Nachgeholt: Hash wurde durch Beenden/Neustart unterbrochen",
-    "relinked": "Legacy-ID korrigiert – Prüfung läuft unter der neuen ID weiter",
-    "stall": "Download hängt – einmalige Neuprüfung",
-    "repair": "Reparieren – alle Dateien werden gegen den Torrent geprüft, Fehlendes geladen",
-    "update_replaced": (
-        "Laufendes Update ersetzt (neue Version oder neuer Torrent beim Host) – "
-        "Geladenes wird wiederverwendet"
-    ),
-    "torrent_rebuilt": "Torrent neu erstellt – Seed prüft Dateien neu",
-    "torrent_missing": "Kein Torrent vorhanden – wird aus den Dateien erstellt",
-    "torrent_forced": "Torrent wird neu erstellt (Inhalt oder Metadaten geändert)",
-    "unknown": "Unbekannt",
-}
+
+def kind_text(kind: str) -> str:
+    key = f"debug.kind.{kind}"
+    text = t(key)
+    return kind if text == key else text
+
 
 _lock = threading.Lock()
 _events: deque[dict[str, Any]] = deque(maxlen=MAX_EVENTS)
@@ -76,7 +46,9 @@ def bind_loop(loop: asyncio.AbstractEventLoop) -> None:
 
 
 def reason_text(reason: str) -> str:
-    return REASON_TEXT.get(reason, reason)
+    key = f"debug.reason.{reason}"
+    text = t(key)
+    return reason if text == key else text
 
 
 def record(
@@ -95,7 +67,7 @@ def record(
             "id": _seq,
             "ts": time.time(),
             "kind": kind,
-            "kind_text": KIND_TEXT.get(kind, kind),
+            "kind_text": kind_text(kind),
             "reason": reason,
             "reason_text": reason_text(reason),
             "game_id": game_id,
@@ -123,7 +95,10 @@ def events(game_id: str | None = None) -> list[dict[str, Any]]:
     if game_id:
         items = [e for e in items if e["game_id"] == game_id]
     items.reverse()
-    return items
+    return [
+        {**e, "kind_text": kind_text(e["kind"]), "reason_text": reason_text(e["reason"])}
+        for e in items
+    ]
 
 
 def clear() -> None:

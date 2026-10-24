@@ -729,3 +729,11 @@ a { color: inherit; text-decoration: none; }
   max-height: 220px;
   overflow: auto;
 }
+
+.lang-picker {
+  display: flex;
+  gap: 8px;
+}
+.lang-picker .btn {
+  flex: 1;
+}

@@ -10,6 +10,7 @@ import { Downloads }  from './components/Downloads.js';
 import { Settings }   from './components/Settings.js';
 import { Debug }      from './components/Debug.js';
 import { isDebug, onDebugChange } from './debug.js';
+import { t, setLanguage, onLanguageChange } from './i18n/index.js';
 
 // ── Grid navigation hook ──────────────────────────────────────────
 // Arrow keys move focus between [data-card] elements inside ref.current.
@@ -45,6 +46,7 @@ function App() {
   const [downloads, setDownloads] = useState([]);
   const [toast, setToast]         = useState('');
   const [debug, setDebugState]    = useState(isDebug());
+  const [lang, setLang]           = useState(null);
   const toastTimer = useRef(null);
 
   // Settings badge: newer DeckDrop on a LAN peer (checked locally, no
@@ -59,6 +61,8 @@ function App() {
     const t = setInterval(poll, 60_000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => onLanguageChange(setLang), []);
 
   useEffect(() => onDebugChange((on) => {
     setDebugState(on);
@@ -84,7 +88,9 @@ function App() {
 
   // -- Initial status fetch --
   useEffect(() => {
-    api.status().then(setStatus).catch(() => setStatus({ onboarding_complete: false, name: '' }));
+    api.status()
+      .then((s) => { setLanguage(s.language); setStatus(s); })
+      .catch(() => setStatus({ onboarding_complete: false, name: '' }));
   }, []);
 
   // -- WebSocket --
@@ -124,8 +130,8 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(''), 2200);
   }, []);
 
-  const onboardingDone = (name) => {
-    setStatus(s => ({ ...s, onboarding_complete: true, name }));
+  const onboardingDone = (name, language) => {
+    setStatus(s => ({ ...s, onboarding_complete: true, name, language }));
   };
 
   const activeDlCount = downloads.filter(d =>
@@ -149,8 +155,8 @@ function App() {
   };
 
   return html`
-    <div id="app-inner">
-      ${debug && html`<div class="debug-badge" title="Debug-Modus aktiv (?debug=0 zum Ausschalten)">DEBUG</div>`}
+    <div id="app-inner" key=${lang}>
+      ${debug && html`<div class="debug-badge" title=${t('app.debugBadge')}>DEBUG</div>`}
       ${views[view] ?? views.games}
       <${Nav} view=${view} onNav=${setView} dlCount=${activeDlCount} debug=${debug} updateAvailable=${updateAvailable} />
       <${Toast} message=${toast} />

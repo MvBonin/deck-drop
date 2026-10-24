@@ -108,12 +108,12 @@ def test_verify_manifest_accepts_valid_and_rejects_tampering():
     m, sig = _signed()
     assert selfupdate.verify_manifest(m, sig.encode())["version"] == NEW
     tampered = m.replace(b"9.9.9", b"9.9.8")
-    with pytest.raises(selfupdate.UpdateError, match="Signatur"):
+    with pytest.raises(selfupdate.UpdateError, match="signature"):
         selfupdate.verify_manifest(tampered, sig.encode())
     other = ed25519.sign(secrets.token_bytes(32), m).hex()
-    with pytest.raises(selfupdate.UpdateError, match="Signatur"):
+    with pytest.raises(selfupdate.UpdateError, match="signature"):
         selfupdate.verify_manifest(m, other.encode())
-    with pytest.raises(selfupdate.UpdateError, match="Signaturschlüssel"):
+    with pytest.raises(selfupdate.UpdateError, match="signing key"):
         selfupdate.verify_manifest(m, sig.encode(), keys=[])
 
 
@@ -162,7 +162,7 @@ def test_check_github_unsigned_release_is_not_installable():
     )
     r = selfupdate.check_github()
     assert r["newer"] and not r["verified"]
-    assert "nicht signiert" in r["error"]
+    assert "not signed" in r["error"]
 
 
 @respx.mock
@@ -212,8 +212,8 @@ def test_install_wrong_checksum_leaves_original_untouched(env):
 
     assert selfupdate._state.install["state"] == "error"
     assert (
-        "Prüfsumme" in selfupdate._state.install["error"]
-        or "größer" in selfupdate._state.install["error"]
+        "Checksum" in selfupdate._state.install["error"]
+        or "larger" in selfupdate._state.install["error"]
     )
     assert env.read_bytes() == b"old appimage"
     assert not selfupdate.backup_path().exists()
@@ -222,10 +222,10 @@ def test_install_wrong_checksum_leaves_original_untouched(env):
 def test_install_refuses_bad_signature_downgrade_and_non_appimage(env, monkeypatch):
     m, sig = _signed()
     bad_sig = ed25519.sign(secrets.token_bytes(32), m).hex()
-    with pytest.raises(selfupdate.UpdateError, match="Signatur"):
+    with pytest.raises(selfupdate.UpdateError, match="signature"):
         selfupdate.start_install(_source(m, bad_sig), background=False)
     old_m, old_sig = _signed(version="1.0.0")
-    with pytest.raises(selfupdate.UpdateError, match="nicht neuer"):
+    with pytest.raises(selfupdate.UpdateError, match="not newer"):
         selfupdate.start_install(_source(old_m, old_sig), background=False)
     monkeypatch.delenv("APPIMAGE")
     with pytest.raises(selfupdate.UpdateError, match="AppImage"):

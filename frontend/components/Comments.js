@@ -2,12 +2,11 @@ import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
+import { t, getLocale } from '../i18n/index.js';
 
 function fmtDate(iso) {
   if (!iso) return '';
-  const d = new Date(iso);
-  const pad = n => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return new Date(iso).toLocaleString(getLocale(), { dateStyle: 'short', timeStyle: 'short' });
 }
 
 export function Comments({ game, onClose, readOnly = false, peerId = null }) {
@@ -54,19 +53,19 @@ export function Comments({ game, onClose, readOnly = false, peerId = null }) {
       setText('');
       textRef.current?.focus();
     } catch (err) {
-      setError(formatApiError(err, 'Kommentar'));
+      setError(formatApiError(err, 'game'));
     } finally {
       setPosting(false);
     }
   };
 
   return html`
-    <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="Kommentare">
+    <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label=${t('comments.title')}>
       <div class="dialog" style="max-width:520px;width:100%">
         <div class="dialog-title">
-          Kommentare · ${game.name}
+          ${t('comments.titleFor', { name: game.name })}
           ${readOnly && game.peer_name && html`
-            <span style="font-weight:400;font-size:13px;color:var(--muted)"> · von ${game.peer_name}</span>
+            <span style="font-weight:400;font-size:13px;color:var(--muted)">${t('comments.from', { peer: game.peer_name })}</span>
           `}
         </div>
 
@@ -78,7 +77,7 @@ export function Comments({ game, onClose, readOnly = false, peerId = null }) {
             ? html`<div style="text-align:center;padding:24px"><span class="spinner"></span></div>`
             : comments.length === 0
               ? html`<p style="color:var(--muted);font-size:13px;text-align:center;padding:24px 0">${
-                  readOnly ? 'Noch keine Kommentare.' : 'Noch keine Kommentare. Sei der Erste!'
+                  readOnly ? t('comments.none') : t('comments.noneFirst')
                 }</p>`
               : comments.map(c => html`
                   <div key=${c.id} style="background:var(--surface2,#1a1a2e);border-radius:8px;padding:10px 12px">
@@ -94,14 +93,14 @@ export function Comments({ game, onClose, readOnly = false, peerId = null }) {
 
         ${readOnly
           ? html`<div class="dialog-actions">
-              <button type="button" class="btn btn-ghost" onClick=${onClose}>Schließen</button>
+              <button type="button" class="btn btn-ghost" onClick=${onClose}>${t('common.close')}</button>
             </div>`
           : html`<form onSubmit=${submit} style="display:flex;flex-direction:column;gap:10px">
               <textarea
                 ref=${textRef}
                 class="form-input"
                 rows="3"
-                placeholder="Kommentar schreiben…"
+                placeholder=${t('comments.placeholder')}
                 value=${text}
                 onInput=${e => setText(e.target.value)}
                 disabled=${posting}
@@ -109,9 +108,9 @@ export function Comments({ game, onClose, readOnly = false, peerId = null }) {
               />
               ${error && html`<p style="color:var(--danger);font-size:13px;margin:0">${error}</p>`}
               <div class="dialog-actions">
-                <button type="button" class="btn btn-ghost" onClick=${onClose}>Schließen</button>
+                <button type="button" class="btn btn-ghost" onClick=${onClose}>${t('common.close')}</button>
                 <button type="submit" class="btn btn-primary" disabled=${!text.trim() || posting}>
-                  ${posting ? html`<span class="spinner"></span>` : 'Senden'}
+                  ${posting ? html`<span class="spinner"></span>` : t('comments.send')}
                 </button>
               </div>
             </form>`

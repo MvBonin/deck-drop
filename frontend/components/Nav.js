@@ -1,4 +1,5 @@
 import { html } from 'htm/preact';
+import { t } from '../i18n/index.js';
 
 const _gameIcon     = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8L6 7h12z"/></svg>`;
 const _networkIcon  = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 0 1 0 20"/><path d="M12 2a10 10 0 0 0 0 20"/><line x1="2" y1="12" x2="22" y2="12"/></svg>`;
@@ -7,13 +8,13 @@ const _settingsIcon = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="cu
 
 const _debugIcon = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="6" width="8" height="14" rx="4"/><path d="M12 6V3M8 10H4M16 10h4M8 15H4M16 15h4M9 4l1 2M15 4l-1 2"/></svg>`;
 
-const DEBUG_TAB = { id: 'debug', label: 'Debug', icon: _debugIcon };
+const DEBUG_TAB = { id: 'debug', labelKey: 'nav.debug', icon: _debugIcon };
 
 const TABS = [
-  { id: 'games',     label: 'Meine Spiele', icon: _gameIcon },
-  { id: 'network',   label: 'Netzwerk',     icon: _networkIcon },
-  { id: 'downloads', label: 'Downloads',    icon: _downloadIcon },
-  { id: 'settings',  label: 'Einstellungen',icon: _settingsIcon },
+  { id: 'games',     labelKey: 'nav.games',     icon: _gameIcon },
+  { id: 'network',   labelKey: 'nav.network',   icon: _networkIcon },
+  { id: 'downloads', labelKey: 'nav.downloads', icon: _downloadIcon },
+  { id: 'settings',  labelKey: 'nav.settings',  icon: _settingsIcon },
 ];
 
 export function Nav({ view, onNav, dlCount, debug, updateAvailable }) {
@@ -25,7 +26,7 @@ export function Nav({ view, onNav, dlCount, debug, updateAvailable }) {
   };
 
   return html`
-    <nav class="nav" role="tablist" aria-label="Hauptnavigation">
+    <nav class="nav" role="tablist" aria-label=${t('nav.main')}>
       ${tabs.map(tab => html`
         <button
           key=${tab.id}
@@ -37,12 +38,12 @@ export function Nav({ view, onNav, dlCount, debug, updateAvailable }) {
           onKeyDown=${e => handleKey(e, tab.id)}
         >
           <${tab.icon} />
-          ${tab.label}
+          ${t(tab.labelKey)}
           ${tab.id === 'settings' && updateAvailable
-            ? html`<span class="nav-badge" aria-label="DeckDrop-Update verfügbar">↑</span>`
+            ? html`<span class="nav-badge" aria-label=${t('nav.updateAvailable')}>↑</span>`
             : null}
           ${tab.id === 'downloads' && dlCount > 0
-            ? html`<span class="nav-badge" aria-label="${dlCount} aktive Downloads">${dlCount}</span>`
+            ? html`<span class="nav-badge" aria-label=${t('nav.activeDownloads', { count: dlCount })}>${dlCount}</span>`
             : null}
         </button>
       `)}
