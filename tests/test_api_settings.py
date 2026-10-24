@@ -3,6 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from deckdrop import __version__
 from deckdrop.api import state as app_state
 from deckdrop.api.server import create_app
 from deckdrop.core import config as cfg_mod
@@ -47,7 +48,7 @@ def test_status_endpoint(client):
     data = r.json()
     assert data["name"] == "alice"
     assert data["peer_id"]
-    assert data["version"] == "1.0.2"
+    assert data["version"] == __version__
     assert data["onboarding_complete"] is False
 
 
