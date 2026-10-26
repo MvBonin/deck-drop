@@ -64,6 +64,8 @@ class GameOut(BaseModel):
     has_local_cover: bool = False
     info_hash: str | None = None
     source_peer_name: str | None = None
+    # Added/shared locally (no origin peer) – such games can't be repaired.
+    local_share: bool = True
     torrent_preparing: bool = False
     torrent_prep_progress: float | None = None
     torrent_prep_error: str | None = None
@@ -150,6 +152,7 @@ class GameOut(BaseModel):
             has_local_cover=local_cover,
             info_hash=g.torrent.info_hash or None,
             source_peer_name=g.origin.peer_name or None,
+            local_share=local_share,
             torrent_preparing=preparing,
             torrent_prep_progress=prep_progress,
             torrent_prep_error=prep_error,
@@ -743,6 +746,9 @@ async def repair_game(game_id: str, req: UpdateRequest) -> DownloadOut:
     g = s.library.get(game_id)
     if not g:
         raise HTTPException(404, t("err.game_not_found"))
+    if not (g.origin.peer_id or g.origin.peer_name):
+        # Our own game is the source – there is nothing to repair it from.
+        raise HTTPException(409, t("err.repair_own_game"))
 
     tracker = s.get_content_tracker()
     try:

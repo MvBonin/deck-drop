@@ -209,7 +209,7 @@ export function GameCard({
               aria-label=${t('card.showComments')}
             >💬</button>
           `}
-          ${mode === 'own' && onRepair && html`
+          ${mode === 'own' && onRepair && game.local_share === false && html`
             <button
               class="btn btn-ghost"
               style="padding:6px 10px;font-size:15px;min-width:36px"
