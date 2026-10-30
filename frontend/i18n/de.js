@@ -205,6 +205,10 @@ export default {
 
   'game.add': 'Spiel hinzufügen',
   'game.addButton': 'Hinzufügen',
+  'game.browse': 'Durchsuchen…',
+  'game.browseChoose': 'Diesen Ordner wählen',
+  'game.browseEmpty': 'Keine Unterordner',
+  'game.browseUp': 'Nach oben',
   'game.content': 'Inhalt',
   'game.coverNote': '„Suchen“ oder Speichern mit App-ID lädt das Cover von Steam als <code>deckdrop.jpg</code> in den Spielordner (ohne Torrent neu zu bauen).',
   'game.description': 'Beschreibung (optional)',
