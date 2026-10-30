@@ -26,6 +26,7 @@ export const api = {
   games:        ()          => get('/api/games'),
   getGame:      (id)        => get(`/api/games/${id}`),
   addGame:      (body)      => post('/api/games', body),
+  browse:       (path)      => get(`/api/fs/browse?path=${encodeURIComponent(path || '')}`),
   patchGame:    (id, body)  => patch(`/api/games/${id}`, body),
   removeGame:   (id)        => del(`/api/games/${id}`),
   magnet:       (id)        => get(`/api/games/${id}/magnet`),
