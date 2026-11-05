@@ -332,3 +332,56 @@ def test_onboarding_asks_for_language(page: Page, live_server_url: str) -> None:
     page.get_by_role("button", name="Loslegen →").click()
     expect(page.locator("nav.nav").get_by_text("Meine Spiele")).to_be_visible(timeout=10_000)
     assert saved == [{"user_name": "Deck-Test", "language": "de", "onboarding_complete": True}]
+
+
+def test_add_game_browse_folder_prefills_name(page: Page, live_server_url: str) -> None:
+    """ "Browse…" picks a folder; its last path segment becomes the default game name."""
+    listings = {
+        "": {
+            "path": "/home/deck",
+            "parent": "/home",
+            "shortcuts": [],
+            "dirs": [{"name": "Games", "path": "/home/deck/Games"}],
+        },
+        "/home/deck/Games": {
+            "path": "/home/deck/Games",
+            "parent": "/home/deck",
+            "shortcuts": [],
+            "dirs": [{"name": "Celeste", "path": "/home/deck/Games/Celeste"}],
+        },
+        "/home/deck/Games/Celeste": {
+            "path": "/home/deck/Games/Celeste",
+            "parent": "/home/deck/Games",
+            "shortcuts": [],
+            "dirs": [],
+        },
+    }
+
+    def browse(route):
+        from urllib.parse import parse_qs, urlparse
+
+        path = parse_qs(urlparse(route.request.url).query).get("path", [""])[0]
+        route.fulfill(json=listings[path])
+
+    def games(route):
+        if route.request.method == "POST":
+            route.fulfill(status=422, json={"detail": "no deckdrop.toml"})
+        else:
+            route.fulfill(json=[])
+
+    page.route("**/api/fs/browse*", browse)
+    page.route("**/api/games", games)
+    page.goto(live_server_url, wait_until="domcontentloaded")
+
+    page.get_by_role("button", name="Add game").click()
+    page.get_by_role("button", name="Browse…").click()
+    page.get_by_role("button", name="Games").click()
+    page.get_by_role("button", name="Celeste").click()
+    expect(page.get_by_text("/home/deck/Games/Celeste")).to_be_visible(timeout=10_000)
+    page.get_by_role("button", name="Use this folder").click()
+
+    expect(page.get_by_placeholder("/home/user/Games/MyGame")).to_have_value(
+        "/home/deck/Games/Celeste"
+    )
+    page.get_by_role("button", name="Add", exact=True).click()
+    expect(page.get_by_placeholder("Stardew Valley")).to_have_value("Celeste", timeout=10_000)

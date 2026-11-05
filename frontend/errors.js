@@ -59,6 +59,8 @@ const CONTEXT_MAP = {
   download: DOWNLOAD_BY_STATUS,
   settings: SETTINGS_BY_STATUS,
   game: GAME_BY_STATUS,
+  // Folder browser: the server's (translated) detail is already the message.
+  fs: {},
 };
 
 /**

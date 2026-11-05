@@ -63,6 +63,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         # -- API errors --
         "err.local_only": "This endpoint is only available from localhost",
         "err.game_not_found": "Game not found",
+        "err.folder_not_found": "Folder not found: {path}",
+        "err.folder_no_access": "No access to folder: {path}",
         "err.peer_not_found": "Peer not found",
         "err.peer_id_not_found": "Peer {peer_id} not found",
         "err.peer_game_not_found": "Game not found on this peer",
@@ -203,6 +205,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         # -- API errors --
         "err.local_only": "Nur von diesem Gerät aus erreichbar",
         "err.game_not_found": "Spiel nicht gefunden",
+        "err.folder_not_found": "Ordner nicht gefunden: {path}",
+        "err.folder_no_access": "Kein Zugriff auf Ordner: {path}",
         "err.peer_not_found": "Peer nicht gefunden",
         "err.peer_id_not_found": "Peer {peer_id} nicht gefunden",
         "err.peer_game_not_found": "Spiel beim Peer nicht gefunden",

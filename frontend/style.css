@@ -364,6 +364,46 @@ a { color: inherit; text-decoration: none; }
   border-color: var(--accent);
   outline: none;
 }
+.input-row { display: flex; gap: 8px; }
+.input-row .form-input { flex: 1; min-width: 0; }
+.input-row .btn { flex-shrink: 0; width: auto; }
+
+/* Folder picker in "Add game" */
+.folder-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+.folder-shortcuts { display: flex; flex-wrap: wrap; gap: 4px; }
+.folder-shortcuts .btn { width: auto; padding: 4px 10px; font-size: 13px; }
+.folder-current {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: monospace;
+  overflow-wrap: anywhere;
+}
+.folder-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.folder-item {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-item:hover, .folder-item:focus-visible { background: var(--surface-3); outline: none; }
+.folder-empty { font-size: 13px; color: var(--text-dim); padding: 8px 10px; }
+
 .form-select {
   background: var(--surface-2);
   border: 1.5px solid var(--surface-3);

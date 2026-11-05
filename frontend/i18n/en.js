@@ -205,6 +205,10 @@ export default {
 
   'game.add': 'Add game',
   'game.addButton': 'Add',
+  'game.browse': 'Browse…',
+  'game.browseChoose': 'Use this folder',
+  'game.browseEmpty': 'No subfolders',
+  'game.browseUp': 'Up',
   'game.content': 'Content',
   'game.coverNote': '“Search” or saving with an App ID downloads the cover from Steam as <code>deckdrop.jpg</code> into the game folder (without rebuilding the torrent).',
   'game.description': 'Description (optional)',
