@@ -51,11 +51,25 @@ mkdir -p ~/Applications && curl -fL -o ~/Applications/DeckDrop.AppImage \
 DeckDrop starts and opens in your browser. Everything it needs is inside the AppImage
 (Python, libtorrent, the UI).
 
-**In Gaming Mode:** add `~/Applications/DeckDrop.AppImage` as a Non-Steam Game and set its launch
-options to `--kiosk`. It then opens as a fullscreen app.
+**Set it up once** in *Settings → App & background* (or with the Decky plugin, see below):
 
-**Updating:** *Einstellungen → Nach Updates suchen*. The AppImage replaces itself after checking
-its signature and checksum. The UI is currently in German.
+- **Install on this device** copies the AppImage to `~/Applications/DeckDrop.AppImage` and adds
+  "DeckDrop" and "DeckDrop (Gaming Mode)" to the app menu. Updates replace that copy. Same from a
+  terminal: `DeckDrop-*.AppImage --install`.
+- **Run in the background** starts DeckDrop with the Deck (systemd user service) and keeps sharing
+  and downloading in Desktop *and* Gaming Mode, even with the window closed.
+  Terminal: `~/Applications/DeckDrop.AppImage --service on` (`off` removes it).
+
+**In Gaming Mode:** in Steam (Desktop Mode) choose *Add a Game → Add a Non-Steam Game →
+"DeckDrop (Gaming Mode)"*, or use the Decky plugin's "Show in Steam library" toggle. The fullscreen
+window needs Chromium (*Discover → Chromium*). If the background service runs, the window only opens
+it – closing the window keeps sharing.
+
+**Decky plugin** (`decky-plugin/`): status, transfers and updates in the Quick Access menu, plus
+install / background service / Steam library entry with one click each – no Desktop Mode needed.
+
+**Updating:** *Settings → Check for updates*. The AppImage replaces itself after checking its
+signature and checksum.
 
 ### pipx
 
@@ -68,6 +82,8 @@ deckdrop
 
 1. Start DeckDrop on both devices, on the same Wi-Fi or LAN.
 2. On the device that has the game, open **Meine Spiele** → **Spiel hinzufügen** and pick its install folder.
+   DeckDrop searches the Steam store for the folder name; pick the matching game to get name, cover
+   and description, or continue without metadata.
 3. On the other device, open **Netzwerk**. The game shows up there. Click download.
 
 That's it. Both devices need to be online at the same time, since nothing is stored in a cloud.
@@ -92,6 +108,23 @@ DeckDrop notices when the files of a shared game change (a patch, a mod, a manua
 
 Nothing is ever updated automatically. You always start it yourself.
 
+**Files the game changes by itself** (settings, shader caches, logs inside the install folder) would
+mark it as "modified" again and again. Crash dumps, Chromium `GPUCache` and Unreal `Saved/Logs`
+are ignored by default. For anything else:
+
+- In **"Publish update…"**, tick *ignore* next to a changed file. It leaves the shared version, stays
+  on your disk, and later changes to it no longer block sharing. New downloads won't get it, so only
+  ignore files the game creates itself.
+- Or add patterns under **Edit game → Ignored files**, e.g. `settings.ini`, `saves/**`,
+  `**/ShaderCache/**` (presets for shader caches and Unreal's `Saved/`).
+
+A file that is part of the shared version can't just be skipped silently: other devices check every
+piece against the published hashes, so a changed file has to go through "Publish update".
+
+**If the host changes a game while you download it:** the download shows "The host changed this
+game" and waits. Once the host publishes the change, the download offers **"Switch to <version>"**:
+what you already have is checked and reused, only the changed parts are downloaded.
+
 ## Network and privacy
 
 - **Game data stays on your LAN.** Devices find each other via mDNS and transfer via libtorrent
@@ -112,6 +145,8 @@ deckdrop               # start and open the UI in your browser
 deckdrop --kiosk       # fullscreen app window (Gaming Mode, needs Chromium)
 deckdrop --headless    # server only, no browser
 deckdrop --port 8080   # different port
+deckdrop --install     # AppImage: copy to ~/Applications, add menu entries
+deckdrop --service on  # background service at every boot (off | start | stop | status)
 ```
 
 ## For developers
