@@ -5,6 +5,7 @@ import { formatApiError } from '../errors.js';
 import { isDebug, setDebug } from '../debug.js';
 import { AppUpdate } from './AppUpdate.js';
 import { t, LANGUAGES, getLanguage, setLanguage } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 
 export function Settings({ showToast }) {
   const [cfg, setCfg]         = useState(null);
@@ -160,7 +161,7 @@ export function Settings({ showToast }) {
             <div class="settings-row-label">${t('settings.peerId')}</div>
             <div class="settings-row-sub">${t('settings.peerIdSub')}</div>
           </div>
-          <code style="font-size:11px;color:var(--text-dim)">${cfg.peer_id.slice(0,16)}…</code>
+          <code style="font-size:13px;color:var(--text-dim)">${cfg.peer_id.slice(0,16)}…</code>
         </div>
       </div>
 
@@ -173,7 +174,7 @@ export function Settings({ showToast }) {
           </div>
           <input
             class="form-input"
-            style="max-width:240px;font-size:12px"
+            style="max-width:240px;font-size:13px"
             value=${cfg.download_dir}
             onInput=${e => update('download_dir', e.target.value)}
           />
@@ -224,7 +225,7 @@ export function Settings({ showToast }) {
         </div>
       </div>
 
-      <p style="font-size:12px;color:var(--text-dim);padding:4px 20px 12px;line-height:1.6;margin:0">
+      <p style="font-size:13px;color:var(--text-dim);padding:4px 20px 12px;line-height:1.6;margin:0">
         ${t('settings.lanNote', { port: cfg.port, torrentPort: cfg.torrent_port })}
       </p>
 
@@ -245,10 +246,10 @@ export function Settings({ showToast }) {
               </div>
               <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
                 ${svc.running_installed
-                  ? html`<span style="font-size:12px;color:var(--success)">✓ ${t('settings.installedShort')}</span>`
+                  ? html`<span class="card-status ok"><${Icon} name="circle-check" size=${16} />${t('settings.installedShort')}</span>`
                   : svc.installed && !svc.can_install
-                    ? html`<span style="font-size:12px;color:var(--success)">✓ ${t('settings.installedShort')}</span>`
-                    : html`<button type="button" class="btn btn-primary" style="padding:4px 12px;font-size:12px;width:auto"
+                    ? html`<span class="card-status ok"><${Icon} name="circle-check" size=${16} />${t('settings.installedShort')}</span>`
+                    : html`<button type="button" class="btn btn-primary" style="padding:4px 12px;font-size:13px;width:auto"
                         onClick=${installApp} disabled=${svcLoading}>
                         ${svcLoading ? html`<span class="spinner"></span>` : (svc.installed ? t('settings.reinstall') : t('settings.installButton'))}
                       </button>`}
@@ -257,7 +258,7 @@ export function Settings({ showToast }) {
             ${svc.installed && svc.can_install && !svc.running_installed && html`
               <div class="settings-row">
                 <div class="settings-row-sub">${t('settings.restartToInstalled')}</div>
-                <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:12px;width:auto;flex-shrink:0"
+                <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:13px;width:auto;flex-shrink:0"
                   onClick=${restartInstalled}>${t('settings.restartNow')}</button>
               </div>`}
           `}
@@ -267,7 +268,7 @@ export function Settings({ showToast }) {
               <div class="settings-row-sub">${t('settings.serviceSub')}</div>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
-              <span style="font-size:12px;color:${svc.active ? 'var(--success)' : 'var(--text-dim)'}">
+              <span style="font-size:13px;color:${svc.active ? 'var(--success)' : 'var(--text-dim)'}">
                 ${svc.active ? t('settings.active') : t('settings.inactive')}
               </span>
               <label class="toggle">

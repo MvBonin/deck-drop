@@ -75,7 +75,7 @@ export function Debug({ wsEvent }) {
   if (!data) {
     return html`
       <div class="view">
-        <div class="view-header"><div class="view-title">${t('debug.title')}</div></div>
+        <div class="view-header"><h1 class="view-title">${t('debug.title')}</h1></div>
         ${error
           ? html`<p class="debug-empty">${t('common.error', { error })}</p>`
           : html`<div class="empty-state"><div class="spinner"></div></div>`}
@@ -90,7 +90,7 @@ export function Debug({ wsEvent }) {
     <div class="view">
       <div class="view-header">
         <div>
-          <div class="view-title">${t('debug.title')}</div>
+          <h1 class="view-title">${t('debug.title')}</h1>
           <div class="view-subtitle">DeckDrop ${data.version} · Peer ${String(data.peer_id).slice(0, 8)}…</div>
         </div>
         <select class="form-input debug-filter" value=${gameId} onChange=${e => setGameId(e.target.value)}>

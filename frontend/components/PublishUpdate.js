@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { t } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 
 export function PublishUpdate({ game, onClose, onPublished }) {
   const [versionLabel, setVersionLabel] = useState(game.version_label || '');
@@ -92,7 +93,7 @@ export function PublishUpdate({ game, onClose, onPublished }) {
     <div class="overlay" onClick=${e => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label=${t('publish.title')}>
       <div class="dialog">
         <div class="dialog-title">${t('publish.titleFor', { name: game.name })}</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:10px">
           ${t('publish.current', { version: game.version_label || `Rev. ${game.revision ?? 1}` })}
           ${game.created_by && t('publish.createdBy', { name: game.created_by })}
         </div>
@@ -104,12 +105,12 @@ export function PublishUpdate({ game, onClose, onPublished }) {
               <button
                 type="button"
                 class="btn btn-ghost"
-                style="align-self:flex-start;padding:4px 8px;font-size:12px;margin-top:4px"
+                style="align-self:flex-start;padding:4px 8px;font-size:13px;margin-top:4px"
                 onClick=${() => setShowDetails(s => !s)}
-              >${t('publish.details')} ${showDetails ? '▲' : '▾'}</button>
+              >${t('publish.details')} <${Icon} name=${showDetails ? 'chevron-up' : 'chevron-down'} size=${16} /></button>
             `}
             ${showDetails && html`
-              <div style="max-height:200px;overflow-y:auto;font-size:12px;margin-top:6px;display:flex;flex-direction:column;gap:4px">
+              <div style="max-height:200px;overflow-y:auto;font-size:13px;margin-top:6px;display:flex;flex-direction:column;gap:4px">
                 ${changed.map(c => html`
                   <div style="display:flex;align-items:center;gap:6px;justify-content:space-between">
                     <span style=${ignoredChanged[c.path] ? 'text-decoration:line-through;color:var(--text-dim)' : ''}>
@@ -122,7 +123,7 @@ export function PublishUpdate({ game, onClose, onPublished }) {
                   </div>
                 `)}
                 ${changed.length > 0 && html`
-                  <div style="font-size:11px;color:var(--warn);margin-top:2px">${t('publish.ignoreHint')}</div>
+                  <div style="font-size:13px;color:var(--warn);margin-top:2px">${t('publish.ignoreHint')}</div>
                 `}
                 ${removed.map(r => html`
                   <div style="color:var(--danger)">− ${r.path} <span style="color:var(--text-dim)">(${fmtBytes(r.size || 0)})</span></div>
@@ -138,7 +139,7 @@ export function PublishUpdate({ game, onClose, onPublished }) {
                   </label>
                 `)}
                 ${added.length > 0 && html`
-                  <div style="font-size:11px;color:var(--text-dim);margin-top:2px">
+                  <div style="font-size:13px;color:var(--text-dim);margin-top:2px">
                     ${t('publish.unchecked')}
                   </div>
                 `}

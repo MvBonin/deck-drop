@@ -11,27 +11,10 @@ import { Settings }   from './components/Settings.js';
 import { Debug }      from './components/Debug.js';
 import { isDebug, onDebugChange } from './debug.js';
 import { t, setLanguage, onLanguageChange } from './i18n/index.js';
+import { installSpatialNav } from './spatial.js';
 
-// ── Grid navigation hook ──────────────────────────────────────────
-// Arrow keys move focus between [data-card] elements inside ref.current.
-export function useGridNav(ref) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const handler = (e) => {
-      if (!['ArrowRight','ArrowLeft','ArrowDown','ArrowUp'].includes(e.key)) return;
-      const items = [...el.querySelectorAll('[data-card]')];
-      const idx = items.indexOf(document.activeElement);
-      if (idx === -1) return;
-      const cols = Math.max(1, Math.round(el.offsetWidth / 220));
-      const delta = { ArrowRight:1, ArrowLeft:-1, ArrowDown:cols, ArrowUp:-cols }[e.key];
-      const next = items[Math.max(0, Math.min(items.length - 1, idx + delta))];
-      if (next) { e.preventDefault(); next.focus(); }
-    };
-    el.addEventListener('keydown', handler);
-    return () => el.removeEventListener('keydown', handler);
-  }, []);
-}
+// D-pad / arrow-key focus movement for every view (see spatial.js).
+installSpatialNav();
 
 // ── Toast ─────────────────────────────────────────────────────────
 function Toast({ message }) {

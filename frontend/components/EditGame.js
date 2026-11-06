@@ -120,12 +120,12 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
               : html`<button
                   type="button"
                   class="btn btn-ghost"
-                  style="align-self:flex-start;padding:8px 14px;font-size:13px"
+                  style="align-self:flex-start;width:auto"
                   onClick=${() => setSearching(true)}
                   disabled=${loading}
                   title=${t('game.searchSteamTitle')}
                 >${t('game.searchSteam')}</button>`}
-            <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45"
+            <div style="font-size:13px;color:var(--muted);margin-top:2px;line-height:1.45"
               dangerouslySetInnerHTML=${{ __html: t('game.coverNote') }}></div>
           </div>
 
@@ -188,7 +188,7 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
               value=${ignoreText}
               onInput=${e => setIgnoreText(e.target.value)}
               disabled=${loading}
-              style="resize:vertical;font-family:monospace;font-size:12px"
+              style="resize:vertical;font-family:monospace;font-size:13px"
             />
             <div style="display:flex;gap:6px;flex-wrap:wrap">
               ${IGNORE_PRESETS.map(p => html`
@@ -207,7 +207,7 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
               onClick=${() => setShowPublish(true)}
               disabled=${loading}
             >${t('game.publish')}</button>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45">
+            <div style="font-size:13px;color:var(--muted);margin-top:2px;line-height:1.45">
               ${t('game.publishNote')}
             </div>
           </div>

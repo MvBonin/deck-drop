@@ -49,21 +49,21 @@ export function VersionList({ versions, value, onChange }) {
               style="margin-top:3px"
             />
             <div style="flex:1;min-width:0">
-              <div style="display:flex;align-items:center;gap:6px;font-weight:600">
+              <div style="display:flex;align-items:center;gap:6px;font-weight:500">
                 <span>${label}</span>
-                <span style="font-weight:400;color:var(--text-dim);font-size:12px">· Rev. ${v.revision}</span>
+                <span style="font-weight:400;color:var(--text-dim);font-size:13px">· Rev. ${v.revision}</span>
                 ${i === 0 && !disabled && html`<span class="badge badge-success">${t('versions.latest')}</span>`}
               </div>
-              <div style="font-size:12px;color:var(--text-dim);margin-top:2px">
+              <div style="font-size:13px;color:var(--text-dim);margin-top:2px">
                 ${byLine ? t('versions.by', { who: byLine }) : ''}
                 ${peerNames ? t('versions.at', { peers: peerNames }) : ''}
                 ${v.size_bytes ? html` · ${fmtBytes(v.size_bytes)}` : ''}
               </div>
               ${v.version_note && html`
-                <div style="font-size:12px;color:var(--text);margin-top:4px;white-space:pre-wrap">${v.version_note}</div>
+                <div style="font-size:13px;color:var(--text);margin-top:4px;white-space:pre-wrap">${v.version_note}</div>
               `}
               ${disabled && html`
-                <div style="font-size:11px;color:var(--danger);margin-top:4px">
+                <div style="font-size:13px;color:var(--danger);margin-top:4px">
                   ${t('versions.notShareable')}${v.content_updated_by ? t('versions.modifiedBy', { name: v.content_updated_by }) : ''}
                 </div>
               `}

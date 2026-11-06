@@ -329,7 +329,7 @@ def test_onboarding_asks_for_language(page: Page, live_server_url: str) -> None:
 
     page.get_by_label("Dein Name im Netzwerk").fill("Deck-Test")
     page.get_by_role("checkbox").check()
-    page.get_by_role("button", name="Loslegen →").click()
+    page.get_by_role("button", name="Loslegen").click()
     expect(page.locator("nav.nav").get_by_text("Meine Spiele")).to_be_visible(timeout=10_000)
     assert saved == [{"user_name": "Deck-Test", "language": "de", "onboarding_complete": True}]
 
@@ -385,3 +385,60 @@ def test_add_game_browse_folder_prefills_name(page: Page, live_server_url: str) 
     )
     page.get_by_role("button", name="Add", exact=True).click()
     expect(page.get_by_placeholder("Stardew Valley")).to_have_value("Celeste", timeout=10_000)
+
+
+def _own_game(gid: str, name: str) -> dict:
+    return {
+        "id": gid,
+        "name": name,
+        "version": 1,
+        "size_bytes": 1024,
+        "platform": "linux",
+        "available": True,
+        "added_by": "E2EUser",
+        "updated_at": "2026-09-26T00:00:00+00:00",
+        "has_torrent": True,
+        "shareable": True,
+        "content_state": "clean",
+        "local_share": True,
+    }
+
+
+def _focused_label(page: Page) -> str:
+    return page.evaluate(
+        "() => { const a = document.activeElement;"
+        " return a.getAttribute('aria-label') || a.textContent.trim(); }"
+    )
+
+
+def test_dpad_reaches_cards_and_their_buttons(page: Page, live_server_url: str) -> None:
+    """Steam Deck: the d-pad (arrow keys) walks cards, enters a card's buttons
+    with Down, leaves them with Up, and never traps focus in a dialog's select."""
+    games = [_own_game("a1", "Alpha"), _own_game("b2", "Bravo")]
+    page.route("**/api/games", lambda route: route.fulfill(json=games))
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    expect(page.get_by_role("article", name="Alpha")).to_be_visible(timeout=10_000)
+
+    page.keyboard.press("ArrowDown")  # nothing focused yet → first card
+    assert _focused_label(page) == "Alpha"
+    page.keyboard.press("ArrowRight")
+    assert _focused_label(page) == "Bravo"
+    page.keyboard.press("ArrowDown")  # into the card's buttons
+    assert _focused_label(page) == "Show comments"
+    page.keyboard.press("ArrowRight")
+    assert _focused_label(page) == "Edit game"
+    page.keyboard.press("ArrowUp")  # back out to the card
+    assert _focused_label(page) == "Bravo"
+
+    # A / Enter on your own game opens its settings (it used to remove it).
+    page.keyboard.press("Enter")
+    dialog = page.get_by_role("dialog", name="Edit game")
+    expect(dialog).to_be_visible()
+    for _ in range(3):
+        page.keyboard.press("ArrowDown")
+    assert page.evaluate("() => !!document.activeElement.closest('.overlay')")
+    # the platform <select> is passed, not a trap
+    assert page.evaluate("() => document.activeElement.tagName") != "SELECT"
+    page.keyboard.press("Escape")
+    expect(dialog).to_have_count(0)

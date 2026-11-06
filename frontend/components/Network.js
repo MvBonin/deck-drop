@@ -1,13 +1,13 @@
 import { html } from 'htm/preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { GameCard } from './GameCard.js';
 import { Comments } from './Comments.js';
 import { VersionList } from './VersionList.js';
 import { UpdateGame } from './UpdateGame.js';
-import { useGridNav } from '../app.js';
 import { t } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 
 export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   const [games, setGames]     = useState([]);
@@ -19,8 +19,6 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   const [chosenVersionKey, setChosenVersionKey] = useState(null);
   const [updateGame, setUpdateGame] = useState(null); // locally installed game to update
   const [query, setQuery]     = useState('');
-  const gridRef = useRef(null);
-  useGridNav(gridRef);
 
   const load = async () => {
     try {
@@ -100,13 +98,13 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
     <div class="view">
       <div class="view-header">
         <div>
-          <div class="view-title">${t('net.title')}</div>
+          <h1 class="view-title">${t('net.title')}</h1>
           <div class="view-subtitle">${t('net.peersOnline', { count: onlineCount })}</div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
           ${peers.map(p => html`
             <span key=${p.peer_id} class="peer-chip">
-              <span class="peer-dot"></span>${p.name} (${p.game_count})
+              <span class="peer-dot"></span>${p.name}${typeof p.game_count === 'number' ? html` <span style="color:var(--text-dim)">${p.game_count}</span>` : null}
             </span>`
           )}
         </div>
@@ -129,7 +127,7 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
         ? html`<div class="empty-state"><div class="spinner"></div></div>`
         : games.length === 0
           ? html`<div class="empty-state">
-              <div class="empty-icon">📡</div>
+              <div class="empty-icon"><${Icon} name="radio-tower" /></div>
               <div class="empty-title">${onlineCount > 0 ? t('net.noGames') : t('net.noPeers')}</div>
               <div class="empty-sub">${onlineCount > 0
                 ? t('net.noGamesSub')
@@ -137,11 +135,11 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
             </div>`
           : filtered.length === 0
             ? html`<div class="empty-state">
-                <div class="empty-icon">🔍</div>
+                <div class="empty-icon"><${Icon} name="search" /></div>
                 <div class="empty-title">${t('net.noMatches')}</div>
                 <div class="empty-sub">${t('net.noMatchesSub', { query })}</div>
               </div>`
-            : html`<div class="card-grid" ref=${gridRef} role="list">
+            : html`<div class="card-grid" role="list">
                 ${filtered.map(g => html`
                   <${GameCard}
                     key=${g.id + g.peer_id}

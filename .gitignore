@@ -227,3 +227,6 @@ DeckDrop.flatpak
 DeckDrop-*.AppDir/
 DeckDrop-*-*.AppImage
 appimagetool
+
+# taste skill deal history (local)
+.taste-skill/

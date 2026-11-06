@@ -2,8 +2,9 @@ import { html } from 'htm/preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { t } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 
-const PLATFORM_ICON = { windows: '🪟', linux: '🐧', mac: '🍎' };
+const PLATFORM_LABEL = { windows: 'Win', linux: 'Linux', mac: 'Mac' };
 
 /**
  * Search online metadata (Steam store) for a game and let the user pick one
@@ -114,7 +115,7 @@ export function MetadataPicker({ query, onPick, selectedId, autoSearch = true })
               <span class="meta-platforms">
                 ${picking === r.steam_app_id
                   ? html`<span class="spinner"></span>`
-                  : (r.platforms || []).map(p => html`<span title=${p}>${PLATFORM_ICON[p] || p}</span>`)}
+                  : (r.platforms || []).map(p => PLATFORM_LABEL[p] || p).join(' · ')}
               </span>
             </button>`)}
         </div>`}
@@ -133,7 +134,7 @@ export function MetadataChoice({ meta, onChange }) {
         ? html`
           <img class="meta-thumb" src=${`https://cdn.cloudflare.steamstatic.com/steam/apps/${meta.steam_app_id}/capsule_231x87.jpg`} alt=""
             onError=${e => { e.target.style.visibility = 'hidden'; }} />
-          <span class="meta-name">✓ ${meta.name} <span class="meta-sub">Steam ${meta.steam_app_id}</span></span>`
+          <${Icon} name="circle-check" size=${18} /><span class="meta-name">${meta.name} <span class="meta-sub">Steam ${meta.steam_app_id}</span></span>`
         : html`<span class="meta-name meta-sub">${t('meta.noneChosen')}</span>`}
       <button type="button" class="btn btn-ghost btn-sm" onClick=${onChange}>${t('meta.change')}</button>
     </div>`;

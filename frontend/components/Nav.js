@@ -1,12 +1,13 @@
 import { html } from 'htm/preact';
 import { t } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 
-const _gameIcon     = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8L6 7h12z"/></svg>`;
-const _networkIcon  = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 0 1 0 20"/><path d="M12 2a10 10 0 0 0 0 20"/><line x1="2" y1="12" x2="22" y2="12"/></svg>`;
-const _downloadIcon = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
-const _settingsIcon = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
-
-const _debugIcon = () => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="6" width="8" height="14" rx="4"/><path d="M12 6V3M8 10H4M16 10h4M8 15H4M16 15h4M9 4l1 2M15 4l-1 2"/></svg>`;
+const _icon = (name) => () => html`<${Icon} name=${name} size=${24} />`;
+const _gameIcon     = _icon('gamepad-2');
+const _networkIcon  = _icon('radio-tower');
+const _downloadIcon = _icon('download');
+const _settingsIcon = _icon('settings');
+const _debugIcon    = _icon('bug');
 
 const DEBUG_TAB = { id: 'debug', labelKey: 'nav.debug', icon: _debugIcon };
 
@@ -40,7 +41,7 @@ export function Nav({ view, onNav, dlCount, debug, updateAvailable }) {
           <${tab.icon} />
           ${t(tab.labelKey)}
           ${tab.id === 'settings' && updateAvailable
-            ? html`<span class="nav-badge" aria-label=${t('nav.updateAvailable')}>↑</span>`
+            ? html`<span class="nav-badge" aria-label=${t('nav.updateAvailable')}><${Icon} name="arrow-up" size=${14} /></span>`
             : null}
           ${tab.id === 'downloads' && dlCount > 0
             ? html`<span class="nav-badge" aria-label=${t('nav.activeDownloads', { count: dlCount })}>${dlCount}</span>`
