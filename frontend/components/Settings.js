@@ -225,7 +225,7 @@ export function Settings({ showToast }) {
         </div>
       </div>
 
-      <p style="font-size:13px;color:var(--text-dim);padding:4px 20px 12px;line-height:1.6;margin:0">
+      <p style="font-size:13px;color:var(--text-dim);padding:4px var(--gut) 12px;line-height:1.6;margin:0;max-width:calc(920px + 2 * var(--gut))">
         ${t('settings.lanNote', { port: cfg.port, torrentPort: cfg.torrent_port })}
       </p>
 
