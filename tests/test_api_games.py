@@ -95,3 +95,18 @@ def test_patch_game(client, tmp_path):
     r2 = client.patch(f"/api/games/{game_id}", json={"name": "New Name"})
     assert r2.status_code == 200
     assert r2.json()["name"] == "New Name"
+
+
+def test_patch_ignore_patterns(client, tmp_path):
+    game_dir = tmp_path / "IgnoreGame"
+    game_dir.mkdir()
+    gid = client.post("/api/games", json={"path": str(game_dir), "name": "G"}).json()["id"]
+
+    r = client.patch(
+        f"/api/games/{gid}", json={"ignore": [" settings.ini", "", "**/ShaderCache/**"]}
+    )
+    assert r.status_code == 200
+    assert r.json()["ignore"] == ["settings.ini", "**/ShaderCache/**"]
+
+    assert client.patch(f"/api/games/{gid}", json={"ignore": ["../escape"]}).status_code == 400
+    assert client.get(f"/api/games/{gid}").json()["ignore"] == ["settings.ini", "**/ShaderCache/**"]

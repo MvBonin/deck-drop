@@ -572,7 +572,11 @@ class ContentTracker:
             if transfer is not None:
                 transfer.drop_seed(game_id)
 
-            ignore = list(dict.fromkeys([*g.content.ignore, *exclude]))
+            ignore = list(
+                dict.fromkeys(
+                    [*g.content.ignore, *(content.literal_pattern(rel) for rel in exclude)]
+                )
+            )
             old_snapshot = self._entries.get(game_id, {}).get("snapshot") or {}
             rels = content.iter_content_files(g.path, ignore)
 

@@ -6,6 +6,13 @@ import { PublishUpdate } from './PublishUpdate.js';
 import { t } from '../i18n/index.js';
 import { MetadataPicker } from './MetadataPicker.js';
 
+// One-click additions to a game's ignore list. Per game on purpose: some games
+// ship files with these names, so they can't be global defaults.
+const IGNORE_PRESETS = [
+  { key: 'shaderCache', patterns: ['**/ShaderCache/**', '**/shadercache/**', '**/*.shadercache'] },
+  { key: 'unrealSaved', patterns: ['**/Saved/**'] },
+];
+
 export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
   const [showPublish, setShowPublish] = useState(false);
   const [name, setName]             = useState(game.name || '');
@@ -15,6 +22,7 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
   const [launchExe, setLaunchExe]   = useState(game.launch_exe || '');
   const [launchArgs, setLaunchArgs] = useState(game.launch_args || '');
   const [runner, setRunner]         = useState(game.runner || '');
+  const [ignoreText, setIgnoreText] = useState((game.ignore || []).join('\n'));
   const [loading, setLoading]       = useState(false);
   const [searching, setSearching]   = useState(false);
   const [error, setError]           = useState('');
@@ -35,6 +43,12 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
     if (m.description && !description.trim()) setDesc(m.description);
   };
 
+  const addPreset = (patterns) => {
+    const lines = ignoreText.split('\n').map(l => l.trim()).filter(Boolean);
+    for (const p of patterns) if (!lines.includes(p)) lines.push(p);
+    setIgnoreText(lines.join('\n'));
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
@@ -48,6 +62,7 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
         launch_exe: launchExe,
         launch_args: launchArgs,
         runner,
+        ignore: ignoreText.split('\n').map(l => l.trim()).filter(Boolean),
       };
       if (appId) body.steam_app_id = parseInt(appId, 10);
       const updated = await api.patchGame(game.id, body);
@@ -161,6 +176,26 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
               onInput=${e => setRunner(e.target.value)}
               disabled=${loading}
             />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="edit-ignore">${t('game.ignore')}</label>
+            <textarea
+              id="edit-ignore"
+              class="form-input"
+              rows="3"
+              placeholder=${'**/ShaderCache/**\nsettings.ini'}
+              value=${ignoreText}
+              onInput=${e => setIgnoreText(e.target.value)}
+              disabled=${loading}
+              style="resize:vertical;font-family:monospace;font-size:12px"
+            />
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${IGNORE_PRESETS.map(p => html`
+                <button type="button" class="btn btn-ghost btn-sm" style="width:auto"
+                  onClick=${() => addPreset(p.patterns)} disabled=${loading}>+ ${t(`game.ignorePreset.${p.key}`)}</button>`)}
+            </div>
+            <div class="form-hint">${t('game.ignoreHint')}</div>
           </div>
 
           <div class="form-group">

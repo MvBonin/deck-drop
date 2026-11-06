@@ -92,6 +92,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "err.no_local_cover": "No local cover found",
         "err.steam_search_failed": "Steam search failed: {error}",
         "err.steam_no_match": "No Steam match for this game name",
+        "err.invalid_ignore_pattern": "Invalid ignore pattern: {pattern}",
         "err.game_modified": "Game has been modified – publish it as an update first.",
         "err.torrent_build_failed": "Torrent could not be created: {error}",
         "err.torrent_preparing": "Torrent is being prepared – please wait a moment and try again.",
@@ -236,6 +237,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "err.no_local_cover": "Kein lokales Cover gefunden",
         "err.steam_search_failed": "Steam-Suche fehlgeschlagen: {error}",
         "err.steam_no_match": "Kein Steam-Treffer für diesen Spielnamen",
+        "err.invalid_ignore_pattern": "Ungültiges Ignorier-Muster: {pattern}",
         "err.game_modified": "Spiel wurde verändert – erst als Update veröffentlichen.",
         "err.torrent_build_failed": "Torrent konnte nicht erzeugt werden: {error}",
         "err.torrent_preparing": (

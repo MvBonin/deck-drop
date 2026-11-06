@@ -10,6 +10,10 @@ export function PublishUpdate({ game, onClose, onPublished }) {
   const [changes, setChanges]           = useState(null);
   const [loadingChanges, setLoadingChanges] = useState(true);
   const [includedAdded, setIncludedAdded]   = useState({});
+  // Changed files the user no longer wants to distribute (settings, caches
+  // the game rewrites) – they leave the shared version and are ignored from
+  // now on, so the next rewrite doesn't block sharing again.
+  const [ignoredChanged, setIgnoredChanged] = useState({});
   const [showDetails, setShowDetails]   = useState(false);
   const [submitting, setSubmitting]     = useState(false);
   const [error, setError]               = useState('');
@@ -33,6 +37,12 @@ export function PublishUpdate({ game, onClose, onPublished }) {
         const included = {};
         for (const a of data.added || []) included[a.path] = true;
         setIncludedAdded(included);
+        const ignored = {};
+        for (const c of data.changed || []) if (c.ignored) ignored[c.path] = true;
+        setIgnoredChanged(ignored);
+        // Few changes: show them right away, they're what the user decides on.
+        const total = (data.changed?.length || 0) + (data.added?.length || 0) + (data.removed?.length || 0);
+        if (total > 0 && total <= 15) setShowDetails(true);
       } catch (err) {
         if (!cancelled) setError(formatApiError(err, 'game'));
       } finally {
@@ -41,6 +51,10 @@ export function PublishUpdate({ game, onClose, onPublished }) {
     })();
     return () => { cancelled = true; };
   }, [game.id]);
+
+  const toggleIgnored = (path) => {
+    setIgnoredChanged((m) => ({ ...m, [path]: !m[path] }));
+  };
 
   const toggleAdded = (path) => {
     setIncludedAdded((m) => ({ ...m, [path]: !m[path] }));
@@ -51,9 +65,10 @@ export function PublishUpdate({ game, onClose, onPublished }) {
     setSubmitting(true);
     setError('');
     try {
-      const exclude = Object.entries(includedAdded)
-        .filter(([, included]) => !included)
-        .map(([path]) => path);
+      const exclude = [
+        ...Object.entries(includedAdded).filter(([, included]) => !included).map(([path]) => path),
+        ...Object.entries(ignoredChanged).filter(([, ignored]) => ignored).map(([path]) => path),
+      ];
       const result = await api.publishUpdate(game.id, {
         version_label: versionLabel.trim(),
         note: note.trim(),
@@ -96,8 +111,19 @@ export function PublishUpdate({ game, onClose, onPublished }) {
             ${showDetails && html`
               <div style="max-height:200px;overflow-y:auto;font-size:12px;margin-top:6px;display:flex;flex-direction:column;gap:4px">
                 ${changed.map(c => html`
-                  <div>~ ${c.path} <span style="color:var(--text-dim)">(${fmtBytes(c.old_size || 0)} → ${fmtBytes(c.new_size || 0)})</span></div>
+                  <div style="display:flex;align-items:center;gap:6px;justify-content:space-between">
+                    <span style=${ignoredChanged[c.path] ? 'text-decoration:line-through;color:var(--text-dim)' : ''}>
+                      ~ ${c.path} <span style="color:var(--text-dim)">(${fmtBytes(c.old_size || 0)} → ${fmtBytes(c.new_size || 0)})</span>
+                    </span>
+                    <label style="display:flex;align-items:center;gap:4px;flex-shrink:0;color:var(--text-dim)">
+                      <input type="checkbox" checked=${!!ignoredChanged[c.path]} onChange=${() => toggleIgnored(c.path)} />
+                      ${t('publish.ignore')}
+                    </label>
+                  </div>
                 `)}
+                ${changed.length > 0 && html`
+                  <div style="font-size:11px;color:var(--warn);margin-top:2px">${t('publish.ignoreHint')}</div>
+                `}
                 ${removed.map(r => html`
                   <div style="color:var(--danger)">− ${r.path} <span style="color:var(--text-dim)">(${fmtBytes(r.size || 0)})</span></div>
                 `)}

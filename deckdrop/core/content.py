@@ -24,24 +24,79 @@ DEFAULT_IGNORE: tuple[str, ...] = (
     "Thumbs.db",
     ".DS_Store",
     "desktop.ini",
+    # Crash dumps and caches games write into their own install folder.
+    # Never needed to run a fresh copy, but they flip a game to "modified".
+    "*.dmp",
+    "*.mdmp",
+    "**/GPUCache/**",  # Chromium/CEF launchers (Paradox, Electron games, …)
+    "**/Saved/Logs/**",  # Unreal Engine
+    "**/Saved/Crashes/**",  # Unreal Engine
     *TORRENT_SKIP_FILENAMES,
 )
 
 
+def _match_one(rel: str, basename: str, pattern: str) -> bool:
+    if pattern.startswith("**/"):
+        # gitignore-style "anywhere": try the pattern against every suffix of
+        # rel that starts at a directory boundary ("a/b/c" → "a/b/c", "b/c", "c").
+        rest = pattern[3:]
+        if not rest:
+            return True
+        parts = rel.split("/")
+        return any(_match_one("/".join(parts[i:]), basename, rest) for i in range(len(parts)))
+    if pattern.endswith("/**"):
+        prefix = pattern[:-3]
+        if rel == prefix or rel.startswith(prefix + "/"):
+            return True
+        # wildcards in the folder part ("Logs*/**")
+        if any(ch in prefix for ch in "*?["):
+            parts = rel.split("/")
+            depth = prefix.count("/") + 1
+            return len(parts) > depth and fnmatch.fnmatchcase("/".join(parts[:depth]), prefix)
+        return False
+    return fnmatch.fnmatchcase(rel, pattern) or fnmatch.fnmatchcase(basename, pattern)
+
+
 def is_ignored(rel: str, patterns: Iterable[str]) -> bool:
-    """True if rel (POSIX relpath) matches TORRENT_SKIP_FILENAMES, DEFAULT_IGNORE or patterns."""
+    """True if rel (POSIX relpath) matches TORRENT_SKIP_FILENAMES, DEFAULT_IGNORE or patterns.
+
+    Pattern syntax (fnmatch on the POSIX relpath, plus):
+    - a pattern without "/" also matches the file's basename ("*.ini")
+    - "dir/**" matches everything below dir (relative to the game root)
+    - "**/x" matches x at any depth ("**/ShaderCache/**", "**/*.cfg")
+    """
     basename = rel.rsplit("/", 1)[-1]
     if basename in TORRENT_SKIP_FILENAMES:
         return True
-    for pattern in (*DEFAULT_IGNORE, *patterns):
-        if pattern.endswith("/**"):
-            prefix = pattern[:-3]
-            if rel == prefix or rel.startswith(prefix + "/"):
-                return True
+    return any(_match_one(rel, basename, p) for p in (*DEFAULT_IGNORE, *patterns))
+
+
+def literal_pattern(rel: str) -> str:
+    """Ignore pattern that matches exactly this relpath, even if it contains
+    fnmatch syntax ("Data[1].bin")."""
+    return "".join(f"[{ch}]" if ch in "*?[" else ch for ch in rel)
+
+
+def normalize_patterns(patterns: Iterable[str]) -> list[str]:
+    """Clean user-entered ignore patterns; raises ValueError for unsafe ones.
+
+    Patterns end up in the shared manifest, so peers apply them too: no
+    absolute paths, no "..", no empty entries, no catch-all.
+    """
+    out: list[str] = []
+    for raw in patterns:
+        p = str(raw).strip().replace("\\", "/")
+        if not p or p.startswith("#"):
             continue
-        if fnmatch.fnmatchcase(rel, pattern) or fnmatch.fnmatchcase(basename, pattern):
-            return True
-    return False
+        while p.startswith("./"):
+            p = p[2:]
+        if p.startswith("/") or ".." in p.split("/") or len(p) > 200:
+            raise ValueError(p)
+        if p in ("*", "**", "**/*", "**/**", "*/**"):
+            raise ValueError(p)
+        if p not in out:
+            out.append(p)
+    return out
 
 
 def iter_content_files(root: Path, patterns: Iterable[str]) -> list[str]:

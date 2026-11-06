@@ -385,4 +385,10 @@ export default {
   'meta.none': 'Continue without metadata',
   'meta.noneChosen': 'Without metadata',
   'meta.change': 'Change',
+  'publish.ignore': 'ignore',
+  'publish.ignoreHint': 'Ignored files are no longer shared and changes to them no longer block sharing. New downloads won\'t get them – only ignore files the game creates itself (settings, caches, logs).',
+  'game.ignore': 'Ignored files',
+  'game.ignoreHint': 'One pattern per line, e.g. settings.ini, saves/** or **/ShaderCache/**. Matching files are not shared and never mark the game as modified. Files that are already in the shared version stay in it until you publish the next update – that dialog pre-selects them for ignoring.',
+  'game.ignorePreset.shaderCache': 'Shader cache',
+  'game.ignorePreset.unrealSaved': 'Unreal Saved/',
 };
