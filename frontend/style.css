@@ -401,6 +401,45 @@ a { color: inherit; text-decoration: none; }
   border-color: var(--accent);
   outline: none;
 }
+.btn.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* ── Metadata picker (Add / Edit game) ────────────────────────── */
+.meta-picker { display: flex; flex-direction: column; gap: 8px; }
+.meta-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+}
+.meta-item, .meta-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1.5px solid transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+}
+.meta-item { cursor: pointer; }
+.meta-item:hover, .meta-item:focus-visible { border-color: var(--accent); outline: none; }
+.meta-item.selected { border-color: var(--accent); background: var(--surface-3); }
+.meta-thumb { width: 92px; height: 35px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: var(--surface-3); }
+.meta-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.meta-sub { color: var(--text-dim); font-size: 12px; }
+.meta-platforms { display: flex; gap: 4px; flex-shrink: 0; }
+.meta-empty, .meta-error { font-size: 13px; color: var(--text-dim); padding: 4px 2px; }
+.meta-error { color: var(--danger); }
+.meta-none { align-self: flex-start; width: auto; }
+.meta-choice .btn { width: auto; flex-shrink: 0; }
+.form-hint { font-size: 11px; color: var(--text-dim); line-height: 1.45; }
+
 .input-row { display: flex; gap: 8px; }
 .input-row .form-input { flex: 1; min-width: 0; }
 .input-row .btn { flex-shrink: 0; width: auto; }

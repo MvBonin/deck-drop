@@ -48,6 +48,8 @@ export const api = {
   getComments:      (id)              => get(`/api/games/${id}/comments`),
   getPeerComments:  (peerId, gameId)  => get(`/api/peers/${peerId}/games/${gameId}/comments`),
   postComment:      (id, text)        => post(`/api/games/${id}/comments`, { text }),
+  searchMetadata:   (q)               => get(`/api/metadata/search?q=${encodeURIComponent(q)}`),
+  metadataDetails:  (appId)           => get(`/api/metadata/steam/${appId}`),
   searchCover:      (id)              => post(`/api/games/${id}/search_cover`),
   scanGames:        ()                => post('/api/games/scan'),
   scanGame:         (id)              => post(`/api/games/${id}/scan`),

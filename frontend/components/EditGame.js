@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { PublishUpdate } from './PublishUpdate.js';
 import { t } from '../i18n/index.js';
+import { MetadataPicker } from './MetadataPicker.js';
 
 export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
   const [showPublish, setShowPublish] = useState(false);
@@ -27,23 +28,11 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
 
-  const searchCover = async () => {
-    setSearching(true);
-    setError('');
-    try {
-      const res = await api.searchCover(game.id);
-      setAppId(String(res.steam_app_id));
-      if (res.cover_downloaded) {
-        const updated = await api.getGame(game.id);
-        onGameUpdated?.(updated);
-      } else {
-        setError(t('game.noSteamCover'));
-      }
-    } catch (err) {
-      setError(t('game.noCoverArt'));
-    } finally {
-      setSearching(false);
-    }
+  const applyMeta = (m) => {
+    setSearching(false);
+    if (!m) return;
+    setAppId(String(m.steam_app_id));
+    if (m.description && !description.trim()) setDesc(m.description);
   };
 
   const submit = async (e) => {
@@ -109,18 +98,18 @@ export function EditGame({ game, onClose, onSaved, onGameUpdated }) {
               placeholder="413150"
               value=${appId}
               onInput=${e => setAppId(e.target.value.replace(/\D/g, ''))}
-              disabled=${loading || searching}
+              disabled=${loading}
             />
-            <button
-              type="button"
-              class="btn btn-ghost"
-              style="align-self:flex-start;padding:8px 14px;font-size:13px"
-              onClick=${searchCover}
-              disabled=${loading || searching}
-              title=${t('game.searchSteamTitle')}
-            >
-              ${searching ? html`<span class="spinner"></span>` : t('game.searchSteam')}
-            </button>
+            ${searching
+              ? html`<${MetadataPicker} query=${name} selectedId=${appId ? parseInt(appId, 10) : null} onPick=${applyMeta} />`
+              : html`<button
+                  type="button"
+                  class="btn btn-ghost"
+                  style="align-self:flex-start;padding:8px 14px;font-size:13px"
+                  onClick=${() => setSearching(true)}
+                  disabled=${loading}
+                  title=${t('game.searchSteamTitle')}
+                >${t('game.searchSteam')}</button>`}
             <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45"
               dangerouslySetInnerHTML=${{ __html: t('game.coverNote') }}></div>
           </div>

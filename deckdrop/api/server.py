@@ -21,6 +21,7 @@ from deckdrop.api.routes import (
     downloads,
     fs,
     games,
+    metadata,
     peers,
     selfupdate,
     service,
@@ -84,6 +85,7 @@ def create_app(lifespan: Any = None) -> FastAPI:
 
     app.include_router(games.router, prefix="/api")
     app.include_router(fs.router, prefix="/api")
+    app.include_router(metadata.router, prefix="/api")
     app.include_router(peers.router, prefix="/api")
     app.include_router(downloads.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")

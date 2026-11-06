@@ -209,6 +209,7 @@ class AddGameRequest(BaseModel):
     name: str | None = None
     platform: str = "any"
     steam_app_id: int | None = None
+    description: str = ""
 
 
 class PatchGameRequest(BaseModel):
@@ -278,6 +279,8 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
             platform=req.platform,
             steam_app_id=req.steam_app_id,
         )
+        if req.description.strip():
+            info.description = req.description.strip()
         game_mod.save(info)
     else:
         loaded = game_mod.load_from_path(path)
