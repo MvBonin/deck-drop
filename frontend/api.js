@@ -37,6 +37,8 @@ export const api = {
   pauseDl:      (id)        => post(`/api/downloads/${id}/pause`),
   resumeDl:     (id)        => post(`/api/downloads/${id}/resume`),
   retryDl:      (id)        => post(`/api/downloads/${id}/retry`),
+  switchDlVersion: (id, versionKey) =>
+    post(`/api/downloads/${id}/switch-version`, { version_key: versionKey }),
   removeDl:     (id, delFiles) =>
     del(`/api/downloads/${id}?delete_files=${delFiles ? 'true' : 'false'}`),
   settings:     ()          => get('/api/settings'),

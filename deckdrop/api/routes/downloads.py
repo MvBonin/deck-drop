@@ -127,6 +127,14 @@ class DownloadOut(BaseModel):
     kind: str = "new"  # "new" | "update" (Phase 5)
     target_version_label: str = ""  # only set for kind == "update"
     repair: bool = False  # update run as "Reparieren"
+    # "" | "waiting" | "replaced" – see transfer.DownloadStatus.source_state
+    source_state: str = ""
+    switch_version_key: str = ""
+    switch_version_label: str = ""
+
+
+class SwitchVersionRequest(BaseModel):
+    version_key: str
 
 
 def _to_out(status: object) -> DownloadOut:
@@ -248,6 +256,62 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
     except Exception:
         s.transfer.release_download_dest(dest_path)
         raise
+
+
+@router.post("/downloads/{download_id}/switch-version", response_model=DownloadOut)
+async def switch_download_version(download_id: str, req: SwitchVersionRequest) -> DownloadOut:
+    """Continue an unfinished first download with another version of the game
+    (the one it was started with is gone, e.g. the host published an update).
+    Files already downloaded are kept and reused where they still match."""
+    s = _get_transfer_or_503()
+    current = s.transfer.get_status(download_id)
+    if current is None:
+        raise HTTPException(404, t("err.download_not_found"))
+    if current.kind != "new":
+        raise HTTPException(400, t("err.switch_version_not_new"))
+
+    version_peers = s.peer_registry.peers_for_version(current.game_id, req.version_key)
+    if not version_peers:
+        raise HTTPException(404, t("err.version_not_found", version=req.version_key))
+    chosen = version_peers[0]
+    game = next((g for g in chosen.games if g.get("id") == current.game_id), {})
+
+    manifest = await asyncio.to_thread(
+        _fetch_peer_manifest, chosen.address, chosen.port, current.game_id
+    )
+    torrent_bytes = await asyncio.to_thread(
+        _fetch_peer_torrent, chosen.address, chosen.port, current.game_id
+    )
+    magnet = ""
+    if torrent_bytes is not None:
+        try:
+            from deckdrop.core.torrent import make_magnet
+
+            magnet, _ = make_magnet(torrent_bytes)
+        except Exception as exc:
+            log.warning("Torrent bytes from %s unusable, falling back: %s", chosen, exc)
+            torrent_bytes = None
+    if not magnet:
+        magnet = await asyncio.to_thread(
+            _fetch_magnet_from_peer, chosen.address, chosen.port, current.game_id
+        )
+
+    ok = s.transfer.switch_download_version(
+        download_id,
+        magnet=magnet,
+        torrent_bytes=torrent_bytes,
+        manifest=manifest,
+        expected_content_hash=game.get("content_hash") or "",
+        peer_id=chosen.peer_id,
+        peer_name=chosen.name,
+        peer_address=chosen.address,
+        extra_peer_ids=[p.peer_id for p in version_peers[1:]],
+    )
+    if not ok:
+        raise HTTPException(500, t("err.switch_version_failed"))
+    out = _status_or_404(s.transfer, download_id)
+    await broadcast("download_progress", out.model_dump())
+    return out
 
 
 @router.get("/downloads", response_model=list[DownloadOut])

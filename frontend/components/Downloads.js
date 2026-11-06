@@ -69,7 +69,7 @@ function endSprintDetail(dl, pct) {
   return parts.length ? parts.join(' · ') : null;
 }
 
-function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
+function DownloadRow({ dl, onPause, onResume, onRetry, onRemove, onSwitch, switching }) {
   const isUpdate = dl.kind === 'update';
   const displayName = dl.repair
     ? t('dl.repairName', { name: dl.game_name, version: dl.target_version_label || '?' })
@@ -129,6 +129,23 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
         </div>
       `}
 
+      ${dl.kind !== 'update' && dl.source_state === 'replaced' && html`
+        <div class="dl-notice">
+          <div style="font-weight:600">${t('dl.versionReplaced', { version: dl.switch_version_label })}</div>
+          <div style="color:var(--text-dim);margin-top:4px">${t('dl.versionReplacedHint')}</div>
+          <button class="btn btn-primary btn-sm" style="width:auto;margin-top:8px"
+            disabled=${switching} onClick=${() => onSwitch(dl)}>
+            ${switching ? html`<span class="spinner"></span>` : t('dl.switchVersion', { version: dl.switch_version_label })}
+          </button>
+        </div>
+      `}
+      ${dl.kind !== 'update' && dl.source_state === 'waiting' && html`
+        <div class="dl-notice">
+          <div style="font-weight:600">${t('dl.sourceChanged')}</div>
+          <div style="color:var(--text-dim);margin-top:4px">${t('dl.sourceChangedHint')}</div>
+        </div>
+      `}
+
       <div class="progress-bar" role="progressbar" aria-valuenow=${fillPct.toFixed(2)} aria-valuemin="0" aria-valuemax="100" aria-label="${pctLabel}">
         <div class="progress-fill ${fillClass}" style="width:${fillPct}%"></div>
       </div>
@@ -167,6 +184,7 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove }) {
 export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
   const [loading, setLoading]     = useState(true);
   const [removeTarget, setRemoveTarget] = useState(null);
+  const [switchingId, setSwitchingId] = useState(null);
 
   const load = async () => {
     try {
@@ -234,6 +252,19 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
     }
   };
 
+  const switchVersion = async (dl) => {
+    setSwitchingId(dl.id);
+    try {
+      const updated = await api.switchDlVersion(dl.id, dl.switch_version_key);
+      setDownloads(prev => prev.map(d => d.id === dl.id ? updated : d));
+      showToast(t('dl.switched', { name: dl.game_name, version: dl.switch_version_label }));
+    } catch (err) {
+      showToast(t('common.error', { error: formatApiError(err, 'download') }));
+    } finally {
+      setSwitchingId(null);
+    }
+  };
+
   const confirmRemove = async (deleteFiles) => {
     const dl = removeTarget;
     if (!dl) return;
@@ -279,6 +310,8 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
                   onResume=${resume}
                   onRetry=${retry}
                   onRemove=${setRemoveTarget}
+                  onSwitch=${switchVersion}
+                  switching=${switchingId === d.id}
                 />
               `)}
             </div>

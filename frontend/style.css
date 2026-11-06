@@ -401,6 +401,14 @@ a { color: inherit; text-decoration: none; }
   border-color: var(--accent);
   outline: none;
 }
+.dl-notice {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(240,160,48,0.10);
+  border: 1px solid var(--warn);
+  font-size: 13px;
+}
 .btn.btn-sm { padding: 5px 10px; font-size: 12px; }
 
 /* ── Metadata picker (Add / Edit game) ────────────────────────── */

@@ -54,6 +54,13 @@ class DownloadStatus:
     kind: str = "new"  # "new" | "update"
     target_version_label: str = ""
     repair: bool = False  # update run as "Reparieren": full recheck, no trust
+    # First downloads only: what happened to the version being downloaded.
+    # "" (fine / host offline), "waiting" (host changed the game and doesn't
+    # share it until it publishes an update), "replaced" (the version is gone
+    # from the network, `switch_version_*` is what the network offers now).
+    source_state: str = ""
+    switch_version_key: str = ""
+    switch_version_label: str = ""
 
 
 @dataclass
@@ -138,6 +145,12 @@ _ACTIVE_DOWNLOAD_STATUSES = frozenset({"queued", "downloading", "verifying", "pa
 def _info_hash_from_magnet(magnet: str) -> str:
     m = re.search(r"btih:([a-fA-F0-9]{40})", magnet, re.I)
     return m.group(1).lower() if m else ""
+
+
+def _strip_torrent_root(path: str) -> str:
+    """ "Root/sub/file.bin" → "sub/file.bin" (torrent paths carry the folder name)."""
+    parts = path.replace("\\", "/").split("/", 1)
+    return parts[1] if len(parts) == 2 else ""
 
 
 def _peer_http_url(address: str, port: int, path: str) -> str:
@@ -1434,6 +1447,191 @@ class TransferManager:
         )
         return True
 
+    # -- first download whose version left the network --
+
+    def source_info(self, rec: _PersistedRecord) -> tuple[str, str, str]:
+        """(source_state, switch_version_key, switch_version_label) for `rec`.
+
+        Only first downloads: an update has its own "Update neu starten" offer
+        on the game card. See DownloadStatus.source_state.
+        """
+        if rec.kind != "new":
+            return "", "", ""
+        try:
+            from deckdrop.api import state as app_state
+
+            registry = app_state.get().peer_registry
+        except Exception:
+            return "", "", ""
+        expected = (rec.expected_content_hash or "").lower()
+        seen_game = False
+        offers: list[dict] = []
+        for peer in registry.all():
+            if not getattr(peer, "online", False):
+                continue
+            for game in peer.games:
+                if game.get("id") != rec.game_id:
+                    continue
+                seen_game = True
+                if not game.get("shareable", True) or not game.get("has_torrent"):
+                    continue
+                remote_content = (game.get("content_hash") or "").lower()
+                remote_info = (game.get("info_hash") or "").lower()
+                if (expected and remote_content == expected) or (
+                    remote_info and remote_info == rec.info_hash
+                ):
+                    return "", "", ""  # someone still offers exactly this version
+                if not expected and not remote_content:
+                    # Legacy download without a content hash: the automatic
+                    # torrent upgrade (_maybe_upgrade_from_peer) handles it.
+                    return "", "", ""
+                offers.append(game)
+        if offers:
+            best = max(
+                offers,
+                key=lambda g: (int(g.get("revision") or 1), g.get("content_updated_at") or ""),
+            )
+            key = best.get("content_hash") or best.get("info_hash") or ""
+            label = best.get("version_label") or f"Rev. {best.get('revision') or '?'}"
+            return "replaced", key, label
+        if seen_game:
+            return "waiting", "", ""
+        return "", "", ""
+
+    def _with_source_info(self, status: DownloadStatus) -> DownloadStatus:
+        rec = self._paused.get(status.id)
+        if rec is not None and status.status not in ("done", "seeding"):
+            state, key, label = self.source_info(rec)
+            status.source_state = state
+            status.switch_version_key = key
+            status.switch_version_label = label
+        return status
+
+    def switch_download_version(
+        self,
+        download_id: str,
+        *,
+        magnet: str,
+        torrent_bytes: bytes | None,
+        manifest: dict | None,
+        expected_content_hash: str,
+        peer_id: str,
+        peer_name: str,
+        peer_address: str,
+        extra_peer_ids: list[str] | None = None,
+    ) -> bool:
+        """Point an unfinished first download at another version of the game.
+
+        Files already on disk stay: libtorrent checks them against the new
+        torrent and only fetches what differs (files are piece-aligned, so
+        unchanged files keep their pieces). Files the new version no longer
+        has are deleted, they'd otherwise be left over in the game folder.
+        """
+        rec = self._paused.get(download_id)
+        if rec is None or rec.kind != "new" or download_id in self._completed_ids:
+            return False
+        info_hash = _info_hash_from_magnet(magnet)
+        if not info_hash:
+            return False
+
+        old_files = self._torrent_relpaths(download_id)
+        h = self._handles.pop(download_id, None)
+        if h:
+            try:
+                self._session.remove_torrent(h.handle)
+            except Exception:
+                pass
+
+        self._resume_store.discard(download_id)
+        self._by_info_hash.pop(rec.info_hash, None)
+        if torrent_bytes:
+            self._resume_store.save_torrent(download_id, info_hash, torrent_bytes)
+        if manifest:
+            self._resume_store.save_manifest(download_id, manifest)
+
+        new_files = set((manifest or {}).get("files") or {})
+        if not new_files and torrent_bytes:
+            new_files = self._relpaths_from_torrent_bytes(torrent_bytes)
+        if old_files and new_files:
+            from deckdrop.core import content
+
+            keep = list(((manifest or {}).get("content") or {}).get("ignore") or [])
+            stale = {rel for rel in old_files - new_files if not content.is_ignored(rel, keep)}
+            self._delete_stale_download_files(Path(rec.dest_path), stale)
+
+        rec.magnet = magnet
+        rec.info_hash = info_hash
+        rec.expected_content_hash = expected_content_hash
+        rec.peer_id = peer_id
+        rec.peer_name = peer_name
+        rec.peer_address = peer_address
+        rec.extra_peer_ids = list(dict.fromkeys(extra_peer_ids or []))
+        rec.has_resume_data = False
+        rec.error = None
+        rec.error_recoverable = False
+        rec.restore_attempts = 0
+        rec.user_paused = False
+        self._user_paused.discard(download_id)
+        self._recheck_done.discard(download_id)
+        self._forget_download_timers(download_id)
+
+        if not self._reattach_download(rec):
+            self._save_state()
+            return False
+        log.info(
+            "Download %s switched to another version (%s…, from %s)",
+            download_id,
+            info_hash[:8],
+            peer_name,
+        )
+        return True
+
+    def _torrent_relpaths(self, download_id: str) -> set[str]:
+        """Paths of the running torrent's files, relative to the game folder."""
+        h = self._handles.get(download_id)
+        if h is None:
+            return set()
+        try:
+            ti = h.handle.torrent_file()
+            if ti is None:
+                return set()
+            fs = ti.files()
+            return {
+                rel
+                for i in range(fs.num_files())
+                if (rel := _strip_torrent_root(fs.file_path(i))) and not rel.startswith(".pad/")
+            }
+        except Exception as exc:
+            log.debug("No file list for %s: %s", download_id, exc)
+            return set()
+
+    @staticmethod
+    def _relpaths_from_torrent_bytes(blob: bytes) -> set[str]:
+        try:
+            lt = _lt()
+            fs = lt.torrent_info(lt.bdecode(blob)).files()
+            return {
+                rel
+                for i in range(fs.num_files())
+                if (rel := _strip_torrent_root(fs.file_path(i))) and not rel.startswith(".pad/")
+            }
+        except Exception as exc:
+            log.debug("Could not read torrent file list: %s", exc)
+            return set()
+
+    @staticmethod
+    def _delete_stale_download_files(dest_path: Path, rels: set[str]) -> None:
+        from deckdrop.core import content
+
+        for rel in sorted(rels):
+            path = content.safe_join(dest_path, rel)
+            if path is None:
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                log.warning("Could not remove stale file %s: %s", path, exc)
+
     def _forget_download_timers(self, download_id: str) -> None:
         """Reset every per-download timer/heuristic (retry, upgrade, removal)."""
         self._last_downloaded.pop(download_id, None)
@@ -1546,10 +1744,10 @@ class TransferManager:
     def get_status(self, download_id: str) -> DownloadStatus | None:
         h = self._handles.get(download_id)
         if h:
-            return self._build_status(h)
+            return self._with_source_info(self._build_status(h))
         rec = self._paused.get(download_id)
         if rec:
-            return self._paused_status(rec)
+            return self._with_source_info(self._paused_status(rec))
         return None
 
     def reserve_download_dest(self, dest_path: Path) -> None:
@@ -1592,7 +1790,7 @@ class TransferManager:
         for did, rec in self._paused.items():
             if did not in seen:
                 result.append(self._paused_status(rec))
-        return [s for s in result if s.status in _ACTIVE_DOWNLOAD_STATUSES]
+        return [self._with_source_info(s) for s in result if s.status in _ACTIVE_DOWNLOAD_STATUSES]
 
     def _remote_peer_game(self, h: _Handle) -> tuple[object | None, dict | None]:
         """Return (peer, remote_game_dict) for this download's source, if known."""
@@ -2191,6 +2389,9 @@ class TransferManager:
             "phase": status.phase,
             "phase_progress": status.phase_progress,
             "stall_seconds": status.stall_seconds,
+            "source_state": status.source_state,
+            "switch_version_key": status.switch_version_key,
+            "switch_version_label": status.switch_version_label,
         }
 
     def _track_progress(self, download_id: str, downloaded_bytes: int) -> None:
@@ -2530,7 +2731,9 @@ class TransferManager:
         for rec in list(self._paused.values()):
             if rec.preparing and rec.download_id not in self._handles:
                 status = self._paused_status(rec)
-                await broadcast("download_progress", self._progress_payload(status))
+                await broadcast(
+                    "download_progress", self._progress_payload(self._with_source_info(status))
+                )
 
         for h in list(self._handles.values()):
             try:

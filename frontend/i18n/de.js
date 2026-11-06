@@ -391,4 +391,10 @@ export default {
   'game.ignoreHint': 'Ein Muster pro Zeile, z. B. settings.ini, saves/** oder **/ShaderCache/**. Passende Dateien werden nicht geteilt und markieren das Spiel nie als verändert. Dateien, die schon in der geteilten Version stecken, bleiben drin, bis du das nächste Update veröffentlichst – dort sind sie dann zum Ignorieren vorausgewählt.',
   'game.ignorePreset.shaderCache': 'Shader-Cache',
   'game.ignorePreset.unrealSaved': 'Unreal Saved/',
+  'dl.versionReplaced': 'Diese Version wird nicht mehr geteilt – der Host hat {version} veröffentlicht.',
+  'dl.versionReplacedHint': 'Wechsle, um weiterzumachen: Bereits Geladenes wird geprüft und weiterverwendet, geladen wird nur, was sich geändert hat.',
+  'dl.switchVersion': 'Auf {version} wechseln',
+  'dl.switched': '{name}: lädt jetzt {version}',
+  'dl.sourceChanged': 'Der Host hat das Spiel verändert und teilt es gerade nicht.',
+  'dl.sourceChangedHint': 'Es geht nichts verloren. Der Download läuft weiter, sobald der Host diese Version wieder teilt – oder die Änderung als Update veröffentlicht, dann kannst du hier darauf wechseln.',
 };
