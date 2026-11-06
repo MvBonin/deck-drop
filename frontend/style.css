@@ -302,15 +302,22 @@ a { color: inherit; text-decoration: none; }
 .fab:hover { transform: scale(1.08); }
 
 /* ── Dialog / overlay ─────────────────────────────────────────── */
+/* Dialogs must never be taller than the viewport: on the Steam Deck (800 px,
+   often less with the on-screen keyboard) the action buttons used to end up
+   below the screen edge. The overlay scrolls as a fallback, the dialog itself
+   scrolls its content and keeps .dialog-actions pinned to its bottom edge. */
 .overlay {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.6);
   display: flex;
-  align-items: center;
+  /* "safe" keeps the top reachable when the dialog is taller than the screen */
+  align-items: safe center;
   justify-content: center;
   z-index: 200;
   padding: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   backdrop-filter: blur(4px);
 }
 .dialog {
@@ -319,10 +326,40 @@ a { color: inherit; text-decoration: none; }
   padding: 28px;
   width: 100%;
   max-width: 440px;
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: auto 0;
   display: flex;
   flex-direction: column;
   gap: 18px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+/* Flex children would otherwise shrink instead of letting the dialog scroll. */
+.dialog > * { flex-shrink: 0; }
+.dialog form { flex-shrink: 0; }
+.dialog .dialog-actions {
+  position: sticky;
+  bottom: -28px;           /* = .dialog padding: sit flush with the bottom edge */
+  margin: 0 -28px -28px;
+  padding: 14px 28px 28px;
+  background: var(--surface);
+  border-top: 1px solid var(--surface-3);
+  z-index: 1;
+}
+/* Nested action rows (e.g. the folder browser) stay inline. */
+.dialog .folder-browser .dialog-actions {
+  position: static;
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+  background: none;
+}
+@media (max-height: 560px) {
+  .overlay { padding: 8px; }
+  .dialog { padding: 18px; max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); gap: 12px; }
+  .dialog .dialog-actions { bottom: -18px; margin: 0 -18px -18px; padding: 10px 18px 18px; }
 }
 .dialog-text {
   color: var(--text-dim);
