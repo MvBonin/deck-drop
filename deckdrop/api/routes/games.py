@@ -91,6 +91,8 @@ class GameOut(BaseModel):
     update_restart_available: bool = False
     update_restart_label: str = ""
     restore_available: bool = False
+    # Per-game ignore patterns (shared with peers via the manifest)
+    ignore: list[str] = []
 
     @classmethod
     def from_info(cls, g: GameInfo) -> GameOut:
@@ -176,6 +178,7 @@ class GameOut(BaseModel):
             update_restart_available=restart_available,
             update_restart_label=restart_label,
             restore_available=restore_available,
+            ignore=list(g.content.ignore),
         )
 
 
@@ -209,6 +212,7 @@ class AddGameRequest(BaseModel):
     name: str | None = None
     platform: str = "any"
     steam_app_id: int | None = None
+    description: str = ""
 
 
 class PatchGameRequest(BaseModel):
@@ -219,6 +223,10 @@ class PatchGameRequest(BaseModel):
     launch_exe: str | None = None
     launch_args: str | None = None
     runner: str | None = None
+    # Per-game ignore patterns. Files already in the published version stay
+    # in it until the next "publish update" – changing the list alone never
+    # changes what is shared.
+    ignore: list[str] | None = None
 
 
 class AddCommentRequest(BaseModel):
@@ -278,6 +286,8 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
             platform=req.platform,
             steam_app_id=req.steam_app_id,
         )
+        if req.description.strip():
+            info.description = req.description.strip()
         game_mod.save(info)
     else:
         loaded = game_mod.load_from_path(path)
@@ -344,6 +354,14 @@ def patch_game(game_id: str, req: PatchGameRequest) -> GameOut:
     if req.runner is not None:
         g.steam.runner = req.runner
         changed = True
+    if req.ignore is not None:
+        try:
+            patterns = content.normalize_patterns(req.ignore)
+        except ValueError as exc:
+            raise HTTPException(400, t("err.invalid_ignore_pattern", pattern=str(exc))) from exc
+        if patterns != g.content.ignore:
+            g.content.ignore = patterns
+            changed = True
 
     if changed:
         game_mod.bump_version(g, s.cfg.user_name)
@@ -565,12 +583,24 @@ def get_changes(game_id: str) -> dict[str, object]:
         except OSError:
             return None
 
+    patterns = list(g.content.ignore)
+
+    def _ignored(rel: str) -> bool:
+        return content.is_ignored(rel, patterns)
+
     changed = [
-        {"path": rel, "old_size": g.sizes.get(rel), "new_size": _stat_size(rel)}
+        {
+            "path": rel,
+            "old_size": g.sizes.get(rel),
+            "new_size": _stat_size(rel),
+            "ignored": _ignored(rel),
+        }
         for rel in lists["changed"]
     ]
     removed = [{"path": rel, "size": g.sizes.get(rel)} for rel in lists["removed"]]
-    added = [{"path": rel, "size": _stat_size(rel)} for rel in lists["added"]]
+    added = [
+        {"path": rel, "size": _stat_size(rel), "ignored": _ignored(rel)} for rel in lists["added"]
+    ]
 
     truncated = False
     if len(changed) > _CHANGE_LIST_LIMIT:

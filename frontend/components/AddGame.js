@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { t } from '../i18n/index.js';
+import { MetadataPicker, MetadataChoice } from './MetadataPicker.js';
 
 // Last segment of a path ("/home/me/Games/Celeste/" → "Celeste").
 export function folderName(path) {
@@ -69,6 +70,10 @@ export function AddGame({ onClose, onAdded }) {
   const [browsing, setBrowsing]   = useState(false);
   const [platform, setPlatform]   = useState('any');
   const [appId, setAppId]         = useState('');
+  const [description, setDesc]    = useState('');
+  // undefined = not decided yet, null = "without metadata", object = chosen match
+  const [meta, setMeta]           = useState(undefined);
+  const [picking, setPicking]     = useState(true);
   const [needsWizard, setNeeds]   = useState(false);
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
@@ -91,6 +96,8 @@ export function AddGame({ onClose, onAdded }) {
     setPath(value);
     setNeeds(false);
     setError('');
+    setMeta(undefined);
+    setPicking(true);
     // Default the game name to the folder name until the user types their own.
     if (!nameTouched) setName(folderName(value));
   };
@@ -106,6 +113,7 @@ export function AddGame({ onClose, onAdded }) {
         body.name = name.trim();
         body.platform = platform;
         if (appId) body.steam_app_id = parseInt(appId, 10);
+        if (description.trim()) body.description = description.trim();
       }
       const game = await api.addGame(body);
       onAdded(game);
@@ -120,6 +128,16 @@ export function AddGame({ onClose, onAdded }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const applyMeta = (m) => {
+    setMeta(m);
+    setPicking(false);
+    if (!m) return;
+    if (!nameTouched && m.name) setName(m.name);
+    setAppId(String(m.steam_app_id));
+    if (m.description) setDesc(m.description);
+    if (m.suggested_platform) setPlatform(m.suggested_platform);
   };
 
   const canSubmit = path.trim() && (!needsWizard || name.trim()) && !loading;
@@ -158,6 +176,16 @@ export function AddGame({ onClose, onAdded }) {
             <p style="font-size:13px;color:var(--text-dim)"
               dangerouslySetInnerHTML=${{ __html: t('game.noToml') }}></p>
             <div class="form-group">
+              <span class="form-label">${t('meta.title')}</span>
+              ${picking
+                ? html`<${MetadataPicker}
+                    query=${name}
+                    selectedId=${meta?.steam_app_id}
+                    onPick=${applyMeta} />`
+                : html`<${MetadataChoice} meta=${meta} onChange=${() => setPicking(true)} />`}
+              <div class="form-hint">${t('meta.hint')}</div>
+            </div>
+            <div class="form-group">
               <label class="form-label">${t('game.name')}</label>
               <input
                 class="form-input"
@@ -184,6 +212,17 @@ export function AddGame({ onClose, onAdded }) {
                 placeholder="413150"
                 value=${appId}
                 onInput=${e => setAppId(e.target.value)}
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">${t('game.description')}</label>
+              <textarea
+                class="form-input"
+                rows="3"
+                placeholder=${t('game.descriptionPlaceholder')}
+                value=${description}
+                onInput=${e => setDesc(e.target.value)}
+                style="resize:vertical"
               />
             </div>
           `}

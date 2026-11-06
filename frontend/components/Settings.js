@@ -70,6 +70,28 @@ export function Settings({ showToast }) {
     }
   };
 
+  const installApp = async () => {
+    setSvcLoading(true);
+    try {
+      const result = await api.installApp();
+      setSvc(result);
+      showToast(t('settings.installed', { path: result.install_path }));
+    } catch (err) {
+      showToast(t('common.error', { error: formatApiError(err, 'service') }));
+    } finally {
+      setSvcLoading(false);
+    }
+  };
+
+  const restartInstalled = async () => {
+    try {
+      await api.restartSelfUpdate();
+      showToast(t('settings.restarting'));
+    } catch (err) {
+      showToast(t('common.error', { error: formatApiError(err, 'service') }));
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -209,6 +231,36 @@ export function Settings({ showToast }) {
       <p class="settings-section-title">${t('settings.application')}</p>
       ${svc && html`
         <div class="settings-section">
+          ${(svc.can_install || svc.installed) && html`
+            <div class="settings-row">
+              <div>
+                <div class="settings-row-label">${t('settings.install')}</div>
+                <div class="settings-row-sub">
+                  ${svc.running_installed
+                    ? t('settings.installedAt', { path: svc.install_path })
+                    : svc.installed
+                      ? t('settings.installedElsewhere', { path: svc.install_path })
+                      : t('settings.installSub', { path: svc.install_path })}
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+                ${svc.running_installed
+                  ? html`<span style="font-size:12px;color:var(--success)">✓ ${t('settings.installedShort')}</span>`
+                  : svc.installed && !svc.can_install
+                    ? html`<span style="font-size:12px;color:var(--success)">✓ ${t('settings.installedShort')}</span>`
+                    : html`<button type="button" class="btn btn-primary" style="padding:4px 12px;font-size:12px;width:auto"
+                        onClick=${installApp} disabled=${svcLoading}>
+                        ${svcLoading ? html`<span class="spinner"></span>` : (svc.installed ? t('settings.reinstall') : t('settings.installButton'))}
+                      </button>`}
+              </div>
+            </div>
+            ${svc.installed && svc.can_install && !svc.running_installed && html`
+              <div class="settings-row">
+                <div class="settings-row-sub">${t('settings.restartToInstalled')}</div>
+                <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:12px;width:auto;flex-shrink:0"
+                  onClick=${restartInstalled}>${t('settings.restartNow')}</button>
+              </div>`}
+          `}
           <div class="settings-row">
             <div>
               <div class="settings-row-label">${t('settings.service')}</div>
@@ -218,22 +270,22 @@ export function Settings({ showToast }) {
               <span style="font-size:12px;color:${svc.active ? 'var(--success)' : 'var(--text-dim)'}">
                 ${svc.active ? t('settings.active') : t('settings.inactive')}
               </span>
-              ${svc.enabled
-                ? html`<button
-                    type="button"
-                    class="btn btn-ghost"
-                    style="padding:4px 12px;font-size:12px"
-                    onClick=${disableService}
-                    disabled=${svcLoading}
-                  >${svcLoading ? html`<span class="spinner"></span>` : t('settings.disable')}</button>`
-                : html`<button
-                    type="button"
-                    class="btn btn-primary"
-                    style="padding:4px 12px;font-size:12px"
-                    onClick=${enableService}
-                    disabled=${svcLoading}
-                  >${svcLoading ? html`<span class="spinner"></span>` : t('settings.installService')}</button>`
-              }
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  aria-label=${t('settings.service')}
+                  checked=${svc.enabled}
+                  disabled=${svcLoading}
+                  onChange=${e => (e.target.checked ? enableService() : disableService())}
+                />
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div>
+              <div class="settings-row-label">${t('settings.gamingMode')}</div>
+              <div class="settings-row-sub" dangerouslySetInnerHTML=${{ __html: t('settings.gamingModeSub') }}></div>
             </div>
           </div>
         </div>

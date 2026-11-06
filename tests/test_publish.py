@@ -203,3 +203,28 @@ def test_create_torrent_data_with_file_subset():
             if fs.file_flags(i) & lt.file_storage.flag_pad_file:
                 continue
             assert fs.file_offset(i) % info.piece_length() == 0
+
+
+def test_publish_ignoring_a_changed_file_drops_it_and_stays_clean_afterwards(published_game):
+    """A file the game rewrites (settings) can be ignored while publishing:
+    it leaves the shared version, stays on disk, and later rewrites no longer
+    flip the game to "modified"."""
+    cfg, library, tracker, info = published_game
+    (info.path / "settings[1].ini").write_bytes(b"a=1")
+    with patch("deckdrop.core.torrent_prep.invalidate_torrent"):
+        tracker.scan(info.id)
+        _run_publish_sync(tracker, info.id, "", "", [])
+    assert "settings[1].ini" in game_mod.load_from_path(info.path).files
+
+    (info.path / "settings[1].ini").write_bytes(b"a=22")
+    assert tracker.scan(info.id) == "modified"
+    with patch("deckdrop.core.torrent_prep.invalidate_torrent"):
+        _run_publish_sync(tracker, info.id, "", "", ["settings[1].ini"])
+
+    reloaded = game_mod.load_from_path(info.path)
+    assert "settings[1].ini" not in reloaded.files
+    assert (info.path / "settings[1].ini").read_bytes() == b"a=22"
+    assert tracker.state(info.id) == "clean"
+
+    (info.path / "settings[1].ini").write_bytes(b"a=333")
+    assert tracker.scan(info.id) == "clean"

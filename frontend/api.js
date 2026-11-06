@@ -37,6 +37,8 @@ export const api = {
   pauseDl:      (id)        => post(`/api/downloads/${id}/pause`),
   resumeDl:     (id)        => post(`/api/downloads/${id}/resume`),
   retryDl:      (id)        => post(`/api/downloads/${id}/retry`),
+  switchDlVersion: (id, versionKey) =>
+    post(`/api/downloads/${id}/switch-version`, { version_key: versionKey }),
   removeDl:     (id, delFiles) =>
     del(`/api/downloads/${id}?delete_files=${delFiles ? 'true' : 'false'}`),
   settings:     ()          => get('/api/settings'),
@@ -44,10 +46,13 @@ export const api = {
   serviceStatus: ()         => get('/api/service'),
   enableService: ()         => post('/api/service/enable'),
   disableService: ()        => post('/api/service/disable'),
+  installApp:   ()          => post('/api/install'),
   shutdown:     ()          => post('/api/shutdown'),
   getComments:      (id)              => get(`/api/games/${id}/comments`),
   getPeerComments:  (peerId, gameId)  => get(`/api/peers/${peerId}/games/${gameId}/comments`),
   postComment:      (id, text)        => post(`/api/games/${id}/comments`, { text }),
+  searchMetadata:   (q)               => get(`/api/metadata/search?q=${encodeURIComponent(q)}`),
+  metadataDetails:  (appId)           => get(`/api/metadata/steam/${appId}`),
   searchCover:      (id)              => post(`/api/games/${id}/search_cover`),
   scanGames:        ()                => post('/api/games/scan'),
   scanGame:         (id)              => post(`/api/games/${id}/scan`),

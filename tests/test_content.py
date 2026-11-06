@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from deckdrop.core import content
 
 
@@ -233,3 +235,41 @@ def test_pieces_for_file_exact_multiple_of_piece_length():
 def test_pieces_for_file_empty_file_touches_no_piece():
     r = content.pieces_for_file(4096, 0, 1024)
     assert list(r) == []
+
+
+@pytest.mark.parametrize(
+    ("rel", "patterns", "expected"),
+    [
+        ("Game/Saved/Logs/run.log", [], True),
+        ("Game/Saved/Crashes/x/y.dmp", [], True),
+        ("launcher/GPUCache/data_0", [], True),
+        ("crash.mdmp", [], True),
+        ("bin/game.exe", [], False),
+        ("Game/Saved/SaveGames/1.sav", [], False),
+        ("a/b/ShaderCache/x.bin", ["**/ShaderCache/**"], True),
+        ("ShaderCache/x.bin", ["**/ShaderCache/**"], True),
+        ("cfg/user.cfg", ["**/*.cfg"], True),
+        ("saves/slot1", ["saves/**"], True),
+        ("x/saves/slot1", ["saves/**"], False),  # anchored at the game root
+        ("Logs2/a.txt", ["Logs*/**"], True),
+    ],
+)
+def test_is_ignored_patterns(rel, patterns, expected):
+    assert content.is_ignored(rel, patterns) is expected
+
+
+def test_literal_pattern_matches_only_that_file():
+    pat = content.literal_pattern("Data[1]*.bin")
+    assert content.is_ignored("Data[1]*.bin", [pat])
+    assert not content.is_ignored("Data1X.bin", [pat])
+
+
+def test_normalize_patterns():
+    assert content.normalize_patterns([" a.ini ", "", "# note", "./saves/**", "a.ini", "x\\y"]) == [
+        "a.ini",
+        "saves/**",
+        "x/y",
+    ]
+    for bad in ("/etc/passwd", "../x", "a/../../b", "**", "*"):
+        with pytest.raises(ValueError):
+            content.normalize_patterns([bad])

@@ -66,7 +66,26 @@ def main() -> None:
         default=None,
         help="Override port from config",
     )
+    parser.add_argument(
+        "--install",
+        action="store_true",
+        help="Copy this AppImage to ~/Applications/DeckDrop.AppImage, add menu entries "
+        "(normal + Gaming Mode) and exit",
+    )
+    parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove the background service and the menu entries, then exit",
+    )
+    parser.add_argument(
+        "--service",
+        choices=("on", "off", "start", "stop", "status"),
+        help="Background service (systemd user unit): on = run at every boot, off = remove",
+    )
     args = parser.parse_args()
+
+    if args.install or args.uninstall or args.service:
+        raise SystemExit(_manage(args))
 
     _run(
         headless=args.headless or args.kiosk,
@@ -74,6 +93,131 @@ def main() -> None:
         host=args.host,
         port_override=args.port,
     )
+
+
+def _manage(args: argparse.Namespace) -> int:
+    """Non-interactive setup commands (used by the Decky plugin and by hand)."""
+    import json
+    import os
+
+    from deckdrop.core import config as cfg_mod
+    from deckdrop.core import install as install_mod
+    from deckdrop.core import service as svc
+
+    cfg = cfg_mod.load()
+    rc = 0
+    if args.install:
+        try:
+            target = install_mod.install()
+        except (ValueError, OSError) as exc:
+            print(f"Install failed: {exc}")
+            return 1
+        cfg.appimage_path = str(target)
+        cfg_mod.save(cfg)
+        os.environ["APPIMAGE"] = str(target)
+        svc.refresh_appimage_path(str(target))
+        print(f"Installed: {target}")
+    if args.uninstall:
+        svc.disable()
+        install_mod.uninstall()
+        cfg.autostart = False
+        cfg_mod.save(cfg)
+        print("Service and menu entries removed. The AppImage file was kept.")
+    if args.service == "on":
+        appimage = ""
+        installed = install_mod.install_path()
+        if installed.is_file():
+            appimage = str(installed)
+        try:
+            svc.enable(svc.detect_install_type(appimage or cfg.appimage_path), appimage)
+        except ValueError as exc:
+            print(f"Service setup failed: {exc}")
+            return 1
+        cfg.autostart = True
+        cfg_mod.save(cfg)
+    elif args.service == "off":
+        svc.disable()
+        cfg.autostart = False
+        cfg_mod.save(cfg)
+    elif args.service == "start":
+        rc = 0 if svc.start() else 1
+    elif args.service == "stop":
+        rc = 0 if svc.stop() else 1
+    if args.service or args.install:
+        info = {
+            "service_installed": svc.is_installed(),
+            "service_enabled": svc.is_enabled(),
+            "service_active": svc.is_active(),
+            **install_mod.status().to_dict(),
+        }
+        # Last line of output: machine-readable state (read by the Decky plugin)
+        print(json.dumps(info))
+    return rc
+
+
+def _server_status(port: int) -> dict | None:
+    """/api/status of a DeckDrop server already listening on `port`, else None."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=2) as r:
+            data = json.loads(r.read())
+    except Exception:
+        return None
+    return data if isinstance(data, dict) and data.get("peer_id") else None
+
+
+def _wait_for_server(port: int, timeout: float) -> dict | None:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        info = _server_status(port)
+        if info is not None:
+            return info
+        time.sleep(0.5)
+    return None
+
+
+def _attach_to_running(port: int, *, kiosk: bool) -> bool:
+    """Open the UI of an already running DeckDrop instead of replacing it.
+
+    This is what keeps the background service alive when DeckDrop is started
+    from the menu or from Steam (Gaming Mode): previously the new process
+    killed the service and Steam then took the server down with the "game".
+    Returns False if nothing is running – the caller starts a server.
+    """
+    from deckdrop import __version__
+    from deckdrop.core import service as svc
+
+    info = _server_status(port)
+    if info is None:
+        return False
+    if info.get("version") != __version__:
+        if not (svc.is_installed() and svc.is_active()):
+            return False  # a manually started older/newer instance: replace it
+        # The service runs another version (e.g. this is a newer AppImage):
+        # restart it so it picks up the unit's current AppImage path.
+        svc.restart()
+        if _wait_for_server(port, 30.0) is None:
+            return False
+    url = f"http://127.0.0.1:{port}"
+    print(f"DeckDrop is already running – opening {url}")
+    if kiosk:
+        from deckdrop.core import kiosk as kiosk_mod
+
+        proc = kiosk_mod.open_window(url)
+        if proc is None:
+            print(f"No Chromium found. Open {url} manually.")
+            return True
+        # Steam tracks this process as the "game": stay until the window closes.
+        proc.wait()
+    else:
+        from deckdrop.core.hostenv import open_url
+
+        open_url(url)
+    return True
 
 
 def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = False) -> None:
@@ -105,12 +249,19 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
     # Keep an installed service pointing at the currently running AppImage so a
     # newer AppImage replaces the old (stale) path. No-op for the headless
-    # service itself (same path) or non-AppImage installs.
+    # service itself (same path) or non-AppImage installs. An AppImage that
+    # was installed to ~/Applications stays the service's target: starting a
+    # downloaded copy from elsewhere must not repoint the service at a file
+    # that may be deleted later.
     if appimage_env:
         try:
+            from deckdrop.core import install as install_mod
             from deckdrop.core import service as svc_mod
 
-            if svc_mod.refresh_appimage_path(appimage_env):
+            installed = install_mod.install_path()
+            if (not installed.is_file() or appimage_env == str(installed)) and (
+                svc_mod.refresh_appimage_path(appimage_env)
+            ):
                 import logging
 
                 logging.getLogger(__name__).info(
@@ -120,6 +271,13 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
             import logging
 
             logging.getLogger(__name__).warning("Service-Unit-Refresh fehlgeschlagen: %s", exc)
+
+    from deckdrop.core import service as svc_mod
+
+    if not svc_mod.running_as_service() and (not headless or kiosk):
+        # UI launches (menu, Steam shortcut) reuse a running server.
+        if os.environ.get("DECKDROP_RESTARTED") != "1" and _attach_to_running(port, kiosk=kiosk):
+            return
 
     stopped = stop_other_instances(port, config_path=cfg_mod.CONFIG_PATH)
     if stopped:
@@ -239,31 +397,26 @@ def _run(headless: bool, host: str, port_override: int | None, *, kiosk: bool = 
 
         threading.Thread(target=_open_browser, daemon=True).start()
     elif kiosk:
-        import shutil
-        import subprocess
+        import signal
         import threading
         import time
 
-        from deckdrop.core.hostenv import host_env
+        from deckdrop.core import kiosk as kiosk_mod
 
         url = f"http://127.0.0.1:{port}"
 
         def _open_kiosk() -> None:
             time.sleep(1.2)
-            for candidate in ("chromium", "google-chrome-stable", "google-chrome", "brave-browser"):
-                if shutil.which(candidate):
-                    subprocess.Popen(
-                        [
-                            candidate,
-                            f"--app={url}",
-                            "--window-size=1280,800",
-                            "--disable-features=TranslateUI",
-                        ],
-                        env=host_env(),
-                        start_new_session=True,
-                    )
-                    return
-            print(f"No Chromium found. Open {url} manually.")
+            proc = kiosk_mod.open_window(url)
+            if proc is None:
+                print(f"No Chromium found. Open {url} manually.")
+                return
+            proc.wait()
+            # Window closed: in Gaming Mode Steam waits for this process to
+            # end before it considers the "game" closed. Background sharing
+            # is what the service is for.
+            print("Kiosk window closed – stopping DeckDrop")
+            os.kill(os.getpid(), signal.SIGINT)
 
         threading.Thread(target=_open_kiosk, daemon=True).start()
 
