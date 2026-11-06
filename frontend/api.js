@@ -46,6 +46,7 @@ export const api = {
   serviceStatus: ()         => get('/api/service'),
   enableService: ()         => post('/api/service/enable'),
   disableService: ()        => post('/api/service/disable'),
+  installApp:   ()          => post('/api/install'),
   shutdown:     ()          => post('/api/shutdown'),
   getComments:      (id)              => get(`/api/games/${id}/comments`),
   getPeerComments:  (peerId, gameId)  => get(`/api/peers/${peerId}/games/${gameId}/comments`),

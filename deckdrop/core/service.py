@@ -56,14 +56,20 @@ def _exec_start(install_type: InstallType, appimage_path: str = "") -> str:
         path = appimage_path or os.getenv("APPIMAGE", "")
         if not path:
             raise ValueError(t("err.appimage_unknown"))
-        return f"{path} --headless"
+        return f"{_quote_systemd(path)} --headless"
     return "%h/.local/bin/deckdrop --headless"
 
 
+def _quote_systemd(path: str) -> str:
+    if not any(ch in path for ch in " \t\"'\\"):
+        return path
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def _unit_content(exec_start: str, *, appimage_path: str = "") -> str:
-    env_lines = ["Environment=PYTHONUNBUFFERED=1"]
+    env_lines = ["Environment=PYTHONUNBUFFERED=1", "Environment=DECKDROP_SERVICE=1"]
     if appimage_path:
-        env_lines.append(f"Environment=APPIMAGE={appimage_path}")
+        env_lines.append(f"Environment={_quote_systemd(f'APPIMAGE={appimage_path}')}")
     env_block = "\n".join(env_lines)
     return (
         "[Unit]\n"
@@ -83,13 +89,28 @@ def _unit_content(exec_start: str, *, appimage_path: str = "") -> str:
     )
 
 
+def user_bus_env(env: dict[str, str]) -> dict[str, str]:
+    """`systemctl --user` needs the user's runtime dir + session bus. They are
+    missing when DeckDrop was started by something outside the login session
+    (Decky Loader, ssh, a system service) – derive them from the uid."""
+    uid = os.getuid()
+    runtime = env.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
+    env.setdefault("XDG_RUNTIME_DIR", runtime)
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={runtime}/bus")
+    return env
+
+
 def _systemctl(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["systemctl", "--user", *args],
-        capture_output=True,
-        text=True,
-        env=host_env(),
-    )
+    try:
+        return subprocess.run(
+            ["systemctl", "--user", *args],
+            capture_output=True,
+            text=True,
+            env=user_bus_env(host_env()),
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(["systemctl", "--user", *args], 1, "", str(exc))
 
 
 def _enable_linger() -> None:
@@ -109,6 +130,27 @@ def _enable_linger() -> None:
         )
     except OSError:
         pass
+
+
+def is_installed() -> bool:
+    return _UNIT_FILE.is_file()
+
+
+def start() -> bool:
+    return _systemctl("start", _SERVICE_NAME).returncode == 0
+
+
+def stop() -> bool:
+    return _systemctl("stop", _SERVICE_NAME).returncode == 0
+
+
+def restart() -> bool:
+    return _systemctl("restart", _SERVICE_NAME).returncode == 0
+
+
+def running_as_service() -> bool:
+    """True inside the process systemd started for deckdrop.service."""
+    return os.environ.get("DECKDROP_SERVICE") == "1"
 
 
 def is_enabled() -> bool:
@@ -166,6 +208,15 @@ def refresh_appimage_path(appimage_path: str) -> bool:
 def disable() -> None:
     """Disable and stop the service, remove the unit file."""
     _systemctl("disable", "--now", _SERVICE_NAME)
+    if _UNIT_FILE.exists():
+        _UNIT_FILE.unlink()
+    _systemctl("daemon-reload")
+
+
+def disable_keep_running() -> None:
+    """Like `disable()`, but without stopping the running service – used when
+    the request comes from the service process itself."""
+    _systemctl("disable", _SERVICE_NAME)
     if _UNIT_FILE.exists():
         _UNIT_FILE.unlink()
     _systemctl("daemon-reload")
