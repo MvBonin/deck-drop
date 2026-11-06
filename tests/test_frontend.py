@@ -442,3 +442,10 @@ def test_dpad_reaches_cards_and_their_buttons(page: Page, live_server_url: str) 
     assert page.evaluate("() => document.activeElement.tagName") != "SELECT"
     page.keyboard.press("Escape")
     expect(dialog).to_have_count(0)
+
+    # B (Escape) right after opening must close it too: the dialog's key
+    # handler has to exist from the first frame, not after a deferred effect.
+    page.get_by_role("article", name="Alpha").focus()
+    page.keyboard.press("Enter")
+    page.keyboard.press("Escape")
+    expect(dialog).to_have_count(0)

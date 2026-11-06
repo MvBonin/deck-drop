@@ -1,5 +1,5 @@
 import { html } from 'htm/preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useLayoutEffect } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { VersionList } from './VersionList.js';
@@ -42,7 +42,7 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
     return () => { cancelled = true; };
   }, [game.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);

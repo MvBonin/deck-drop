@@ -1,5 +1,5 @@
 import { html } from 'htm/preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useLayoutEffect } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { t } from '../i18n/index.js';
@@ -20,9 +20,9 @@ export function PublishUpdate({ game, onClose, onPublished }) {
   const [error, setError]               = useState('');
   const firstRef = useRef(null);
 
-  useEffect(() => { firstRef.current?.focus(); }, []);
+  useLayoutEffect(() => { firstRef.current?.focus(); }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);

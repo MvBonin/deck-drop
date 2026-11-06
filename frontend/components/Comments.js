@@ -1,5 +1,5 @@
 import { html } from 'htm/preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useLayoutEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { t, getLocale } from '../i18n/index.js';
@@ -18,7 +18,7 @@ export function Comments({ game, onClose, readOnly = false, peerId = null }) {
   const textRef = useRef(null);
   const listRef = useRef(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);

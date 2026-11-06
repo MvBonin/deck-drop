@@ -1,5 +1,5 @@
 import { html } from 'htm/preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useLayoutEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { t } from '../i18n/index.js';
@@ -81,10 +81,10 @@ export function AddGame({ onClose, onAdded }) {
   const firstRef = useRef(null);
 
   // Focus trap: focus first element on open
-  useEffect(() => { firstRef.current?.focus(); }, []);
+  useLayoutEffect(() => { firstRef.current?.focus(); }, []);
 
   // Close on Escape (closes the folder browser first)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const h = (e) => {
       if (e.key !== 'Escape') return;
       if (browsing) setBrowsing(false); else onClose();
