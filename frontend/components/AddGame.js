@@ -1,8 +1,9 @@
 import { html } from 'htm/preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useLayoutEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { t } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 import { MetadataPicker, MetadataChoice } from './MetadataPicker.js';
 
 // Last segment of a path ("/home/me/Games/Celeste/" → "Celeste").
@@ -45,11 +46,11 @@ function FolderBrowser({ start, onPick, onCancel }) {
       <div class="folder-list">
         ${data?.parent && html`
           <button type="button" class="folder-item" onClick=${() => open(data.parent)} disabled=${loading}>
-            ⬆ ${t('game.browseUp')}
+            <${Icon} name="arrow-up" /><span>${t('game.browseUp')}</span>
           </button>`}
         ${data?.dirs.map(d => html`
           <button type="button" class="folder-item" onClick=${() => open(d.path)} disabled=${loading}>
-            📁 ${d.name}
+            <${Icon} name="folder" /><span>${d.name}</span>
           </button>`)}
         ${data && !data.dirs.length && html`<div class="folder-empty">${t('game.browseEmpty')}</div>`}
         ${loading && !data && html`<span class="spinner"></span>`}
@@ -80,10 +81,10 @@ export function AddGame({ onClose, onAdded }) {
   const firstRef = useRef(null);
 
   // Focus trap: focus first element on open
-  useEffect(() => { firstRef.current?.focus(); }, []);
+  useLayoutEffect(() => { firstRef.current?.focus(); }, []);
 
   // Close on Escape (closes the folder browser first)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const h = (e) => {
       if (e.key !== 'Escape') return;
       if (browsing) setBrowsing(false); else onClose();

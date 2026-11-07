@@ -1,5 +1,5 @@
 import { html } from 'htm/preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { GameCard } from './GameCard.js';
@@ -9,8 +9,8 @@ import { Comments } from './Comments.js';
 import { PublishUpdate } from './PublishUpdate.js';
 import { UpdateGame } from './UpdateGame.js';
 import { RepairGame } from './RepairGame.js';
-import { useGridNav } from '../app.js';
 import { t } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 
 export function MyGames({ wsEvent, showToast }) {
   const [games, setGames]       = useState([]);
@@ -23,8 +23,6 @@ export function MyGames({ wsEvent, showToast }) {
   const [publishGame, setPublishGame] = useState(null);
   const [updateGame, setUpdateGame]   = useState(null);
   const [repairGame, setRepairGame]   = useState(null);
-  const gridRef = useRef(null);
-  useGridNav(gridRef);
 
   const syncPrepFromGames = (list) => {
     const next = {};
@@ -201,8 +199,13 @@ export function MyGames({ wsEvent, showToast }) {
     <div class="view">
       <div class="view-header">
         <div>
-          <div class="view-title">${t('myGames.title')}</div>
+          <h1 class="view-title">${t('myGames.title')}</h1>
           <div class="view-subtitle">${t('myGames.shared', { count: games.length })}</div>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn-primary" onClick=${() => setShowAdd(true)}>
+            <${Icon} name="plus" />${t('myGames.add')}
+          </button>
         </div>
       </div>
 
@@ -210,11 +213,11 @@ export function MyGames({ wsEvent, showToast }) {
         ? html`<div class="empty-state"><div class="spinner"></div></div>`
         : games.length === 0
           ? html`<div class="empty-state">
-              <div class="empty-icon">🎮</div>
+              <div class="empty-icon"><${Icon} name="gamepad-2" /></div>
               <div class="empty-title">${t('myGames.emptyTitle')}</div>
               <div class="empty-sub">${t('myGames.emptySub')}</div>
             </div>`
-          : html`<div class="card-grid" ref=${gridRef} role="list">
+          : html`<div class="card-grid" role="list">
               ${games.map(g => html`
                 <${GameCard}
                   key=${g.id}
@@ -222,7 +225,7 @@ export function MyGames({ wsEvent, showToast }) {
                   mode="own"
                   prepProgress=${prepById[g.id]}
                   updateProgress=${updateProgress[g.id]}
-                  onAction=${() => onRemove(g)}
+                  onRemove=${() => onRemove(g)}
                   onEdit=${() => setEditGame(g)}
                   onComments=${() => setCommentsGame(g)}
                   onPublish=${() => setPublishGame(g)}
@@ -233,13 +236,6 @@ export function MyGames({ wsEvent, showToast }) {
               `)}
             </div>`
       }
-
-      <button
-        class="fab"
-        onClick=${() => setShowAdd(true)}
-        title=${t('myGames.add')}
-        aria-label=${t('myGames.add')}
-      >+</button>
 
       ${showAdd && html`<${AddGame} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
       ${editGame && html`<${EditGame} game=${editGame} onClose=${() => setEditGame(null)} onSaved=${onSaved} onGameUpdated=${onGameUpdated} />`}

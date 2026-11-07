@@ -1,5 +1,5 @@
 import { html } from 'htm/preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useLayoutEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { t, getLocale } from '../i18n/index.js';
@@ -18,7 +18,7 @@ export function Comments({ game, onClose, readOnly = false, peerId = null }) {
   const textRef = useRef(null);
   const listRef = useRef(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
@@ -80,10 +80,10 @@ export function Comments({ game, onClose, readOnly = false, peerId = null }) {
                   readOnly ? t('comments.none') : t('comments.noneFirst')
                 }</p>`
               : comments.map(c => html`
-                  <div key=${c.id} style="background:var(--surface2,#1a1a2e);border-radius:8px;padding:10px 12px">
+                  <div key=${c.id} style="background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px">
                     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
-                      <span style="font-weight:600;font-size:13px">${c.author}</span>
-                      <span style="color:var(--muted);font-size:11px">${fmtDate(c.created_at)}</span>
+                      <span style="font-weight:500;font-size:14px">${c.author}</span>
+                      <span style="color:var(--muted);font-size:13px">${fmtDate(c.created_at)}</span>
                     </div>
                     <div style="font-size:14px;white-space:pre-wrap;word-break:break-word">${c.text}</div>
                   </div>

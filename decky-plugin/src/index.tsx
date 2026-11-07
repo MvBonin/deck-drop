@@ -294,7 +294,7 @@ const Content: FC = () => {
     return (
       <PanelSection title="DeckDrop">
         <PanelSectionRow>
-          <span style={{ color: "#ff9800", fontWeight: 500 }}>⚠ {t("notInstalled")}</span>
+          <span style={{ color: "#f2b544", fontWeight: 500 }}>{t("notInstalled")}</span>
         </PanelSectionRow>
         <PanelSectionRow>
           <span style={{ fontSize: "0.8em", color: "#9e9e9e", lineHeight: 1.5 }}>{t("installHint")}</span>
@@ -315,8 +315,8 @@ const Content: FC = () => {
       <PanelSection title="DeckDrop">
         <PanelSectionRow>
           <div style={{ display: "flex", alignItems: "center", fontSize: "0.85em" }}>
-            <StatusDot color={running ? "#4caf50" : "#757575"} />
-            <span style={{ color: running ? "#4caf50" : "#9e9e9e" }}>{stateText}</span>
+            <StatusDot color={running ? "#4cc38a" : "#757575"} />
+            <span style={{ color: running ? "#4cc38a" : "#9e9e9e" }}>{stateText}</span>
           </div>
         </PanelSectionRow>
 
@@ -331,7 +331,7 @@ const Content: FC = () => {
         {status.update_count > 0 && (
           <PanelSectionRow>
             <Field label={t("updatesAvailable")} bottomSeparator="none">
-              <span style={{ color: "#4caf50" }}>{status.update_count}</span>
+              <span style={{ color: "#4cc38a" }}>{status.update_count}</span>
             </Field>
           </PanelSectionRow>
         )}
@@ -416,7 +416,7 @@ const Content: FC = () => {
 
         {status.appimage && hasBrowser === false && (
           <PanelSectionRow>
-            <span style={{ fontSize: "0.8em", color: "#ff9800", lineHeight: 1.5 }}>{t("noBrowser")}</span>
+            <span style={{ fontSize: "0.8em", color: "#f2b544", lineHeight: 1.5 }}>{t("noBrowser")}</span>
           </PanelSectionRow>
         )}
       </PanelSection>

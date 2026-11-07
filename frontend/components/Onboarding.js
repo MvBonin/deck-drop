@@ -2,6 +2,7 @@ import { html } from 'htm/preact';
 import { useState } from 'preact/hooks';
 import { api } from '../api.js';
 import { t, LANGUAGES, getLanguage, setLanguage } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 
 export function Onboarding({ onDone }) {
   const [lang, setLang]       = useState(getLanguage());
@@ -60,7 +61,7 @@ export function Onboarding({ onDone }) {
           </div>
         </div>
 
-        <div style="background:rgba(99,179,237,0.08);border-left:3px solid var(--accent);border-radius:6px;padding:12px 14px;font-size:13px;color:var(--text-dim)"
+        <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;font-size:14px;line-height:1.6;color:var(--text-dim)"
           dangerouslySetInnerHTML=${{ __html: t('onboarding.lanOnly') }}>
         </div>
 
@@ -95,7 +96,7 @@ export function Onboarding({ onDone }) {
           ${error && html`<p style="color:var(--danger);font-size:13px">${error}</p>`}
 
           <button class="btn btn-primary" type="submit" disabled=${!canSubmit}>
-            ${loading ? html`<span class="spinner"></span>` : t('onboarding.start')}
+            ${loading ? html`<span class="spinner"></span>` : html`${t('onboarding.start')}<${Icon} name="arrow-right" size=${18} />`}
           </button>
         </form>
       </div>

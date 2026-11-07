@@ -101,7 +101,7 @@ export function AppUpdate({ title, showToast }) {
 
   const header = (version) => html`
     <div class="view-header">
-      <div class="view-title">${title}</div>
+      <h1 class="view-title">${title}</h1>
       ${version}
     </div>`;
   if (!st) return header(null);
@@ -196,7 +196,7 @@ export function AppUpdate({ title, showToast }) {
       ${st.rollback_available && inst.state !== 'ready' && html`
         <div class="settings-row">
           <div class="settings-row-sub">${t('appUpdate.previousAvailable')}</div>
-          <button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:12px"
+          <button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:13px"
             onClick=${() => restart(true)} disabled=${restarting || installing}>${t('appUpdate.rollback')}</button>
         </div>
       `}

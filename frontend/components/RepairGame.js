@@ -1,5 +1,5 @@
 import { html } from 'htm/preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useLayoutEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { VersionList } from './VersionList.js';
@@ -46,7 +46,7 @@ export function RepairGame({ game, onClose, onStarted }) {
     setPeerId(peers[0]?.peer_id ?? '');
   }, [versionKey, versions.length]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);

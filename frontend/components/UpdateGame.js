@@ -1,9 +1,10 @@
 import { html } from 'htm/preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useLayoutEffect } from 'preact/hooks';
 import { api, fmtBytes } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { VersionList } from './VersionList.js';
 import { t } from '../i18n/index.js';
+import { Icon } from '../icons.js';
 
 /**
  * "Update übernehmen" dialog (Phase 5). Also used for the Phase 7 "restore"
@@ -41,7 +42,7 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
     return () => { cancelled = true; };
   }, [game.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const h = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
@@ -78,25 +79,25 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
     >
       <div class="dialog">
         <div class="dialog-title">${t('update.titleFor', { name: game.name })}</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:10px">
           ${t('update.installed', { version: game.version_label || `Rev. ${game.revision ?? 1}` })}
           ${game.created_by && t('publish.createdBy', { name: game.created_by })}
         </div>
 
         ${modified && html`
-          <div style="font-size:12px;color:var(--danger);background:rgba(220,60,60,0.12);border:1px solid var(--danger);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+          <div class="dl-error" style="font-size:14px;color:var(--danger)">
             ${t('update.overwriteWarning')}
           </div>
         `}
 
         ${replacing && html`
-          <div style="font-size:12px;color:var(--text-dim);background:rgba(108,142,247,0.12);border:1px solid var(--accent-dim);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+          <div class="dl-notice" style="color:var(--text-dim)">
             ${t('update.replacing')}
           </div>
         `}
 
         ${notHashed && html`
-          <div style="font-size:12px;color:var(--text-dim);background:rgba(108,142,247,0.12);border:1px solid var(--accent-dim);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+          <div class="dl-notice" style="color:var(--text-dim)">
             ${game.content_state === 'hashing' ? t('update.cancelCheck') : ''}${t('update.notHashed')}
           </div>
         `}
@@ -122,11 +123,11 @@ export function UpdateGame({ game, onClose, onStarted, restoreKey }) {
                     <button
                       type="button"
                       class="btn btn-ghost"
-                      style="padding:4px 8px;font-size:12px"
+                      style="padding:4px 8px;font-size:13px"
                       onClick=${() => setShowHistory(s => !s)}
-                    >${t('update.history')} ${showHistory ? '▲' : '▾'}</button>
+                    >${t('update.history')} <${Icon} name=${showHistory ? 'chevron-up' : 'chevron-down'} size=${16} /></button>
                     ${showHistory && html`
-                      <div style="max-height:160px;overflow-y:auto;font-size:12px;margin-top:6px;display:flex;flex-direction:column;gap:6px">
+                      <div style="max-height:160px;overflow-y:auto;font-size:13px;margin-top:6px;display:flex;flex-direction:column;gap:6px">
                         ${chosen.history.slice().reverse().map(h => html`
                           <div key=${h.revision}>
                             <strong>${h.version_label || `Rev. ${h.revision}`}</strong>

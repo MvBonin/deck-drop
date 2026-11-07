@@ -3,6 +3,8 @@ import { useState, useEffect } from 'preact/hooks';
 import { api, fmtBytes, fmtSpeed } from '../api.js';
 import { formatApiError, formatTransferError, getTransferHint } from '../errors.js';
 import { t } from '../i18n/index.js';
+import { Icon } from '../icons.js';
+import { useDialogKeys } from '../hooks.js';
 
 const STATUS_LABEL_KEYS = new Set([
   'queued', 'downloading', 'verifying', 'seeding', 'done', 'error', 'paused',
@@ -30,6 +32,10 @@ function statusLabel(dl) {
     // Update: reading the files already on disk to find reusable pieces.
     const pct = Math.round((dl.phase_progress || 0) * 100);
     return t('dl.checkingFiles', { pct });
+  }
+  if (dl.source_state && dl.kind !== 'update' && dl.num_peers === 0) {
+    // the version/host is gone – the notice below explains it
+    return t('dl.status.queued');
   }
   if (dl.status === 'queued' || dl.status === 'downloading') {
     if (dl.phase === 'checking') {
@@ -103,37 +109,45 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove, onSwitch, switc
             ? t('dl.originallyFrom', { peer: dl.peer_name })
             : t('dl.from', { peer: dl.peer_name })}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
-          <span style="font-size:13px;font-weight:600;color:${statusColor}">${statusLabel(dl)}</span>
+        <div class="download-actions">
+          <span class="download-state" style=${`color:${statusColor}`}>${statusLabel(dl)}</span>
           ${canPause && html`
-            <button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onClick=${() => onPause(dl)}>${t('dl.pause')}</button>
+            <button class="btn btn-secondary btn-sm" onClick=${() => onPause(dl)}>
+              <${Icon} name="pause" size=${18} />${t('dl.pause')}
+            </button>
           `}
           ${canResume && html`
-            <button class="btn btn-primary" style="padding:4px 10px;font-size:12px" onClick=${() => onResume(dl)}>${t('dl.resume')}</button>
+            <button class="btn btn-primary btn-sm" onClick=${() => onResume(dl)}>
+              <${Icon} name="play" size=${18} />${t('dl.resume')}
+            </button>
           `}
           ${canRetry && html`
-            <button class="btn btn-primary" style="padding:4px 10px;font-size:12px" onClick=${() => onRetry(dl)}>${t('dl.retry')}</button>
+            <button class="btn btn-primary btn-sm" onClick=${() => onRetry(dl)}>
+              <${Icon} name="refresh-cw" size=${18} />${t('dl.retry')}
+            </button>
           `}
           ${canRemove && html`
-            <button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onClick=${() => onRemove(dl)}>${t('dl.remove')}</button>
+            <button class="btn btn-icon" onClick=${() => onRemove(dl)} title=${t('dl.remove')} aria-label=${t('dl.remove')}>
+              <${Icon} name="trash-2" />
+            </button>
           `}
         </div>
       </div>
 
       ${dl.status === 'error' && errMsg && html`
-        <div style="margin-bottom:8px;padding:10px 12px;border-radius:8px;background:rgba(220,60,60,0.12);border:1px solid var(--danger)">
-          <div style="font-size:13px;font-weight:600;color:var(--danger)">${errMsg}</div>
+        <div class="dl-error">
+          <div style="font-size:14px;font-weight:500;color:var(--danger)">${errMsg}</div>
           ${errHint && html`
-            <div style="font-size:12px;color:var(--text-dim);margin-top:6px">${t('dl.solution', { hint: errHint })}</div>
+            <div style="font-size:13px;color:var(--text-dim);margin-top:6px">${t('dl.solution', { hint: errHint })}</div>
           `}
         </div>
       `}
 
       ${dl.kind !== 'update' && dl.source_state === 'replaced' && html`
         <div class="dl-notice">
-          <div style="font-weight:600">${t('dl.versionReplaced', { version: dl.switch_version_label })}</div>
+          <div style="font-weight:500">${t('dl.versionReplaced', { version: dl.switch_version_label })}</div>
           <div style="color:var(--text-dim);margin-top:4px">${t('dl.versionReplacedHint')}</div>
-          <button class="btn btn-primary btn-sm" style="width:auto;margin-top:8px"
+          <button class="btn btn-primary btn-sm" style="width:auto;margin-top:12px"
             disabled=${switching} onClick=${() => onSwitch(dl)}>
             ${switching ? html`<span class="spinner"></span>` : t('dl.switchVersion', { version: dl.switch_version_label })}
           </button>
@@ -141,7 +155,7 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove, onSwitch, switc
       `}
       ${dl.kind !== 'update' && dl.source_state === 'waiting' && html`
         <div class="dl-notice">
-          <div style="font-weight:600">${t('dl.sourceChanged')}</div>
+          <div style="font-weight:500">${t('dl.sourceChanged')}</div>
           <div style="color:var(--text-dim);margin-top:4px">${t('dl.sourceChangedHint')}</div>
         </div>
       `}
@@ -153,7 +167,7 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove, onSwitch, switc
       <div class="download-stats">
         <span><span class="stat-val">${pctLabel}</span></span>
         ${(dl.status === 'downloading' || dl.status === 'verifying') && html`
-          <span>↓ <span class="stat-val">${fmtSpeed(dl.speed_bytes_sec)}</span></span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><${Icon} name="download" size=${14} /><span class="stat-val">${fmtSpeed(dl.speed_bytes_sec)}</span></span>
           <span dangerouslySetInnerHTML=${{ __html: t('dl.peers', { count: dl.num_peers }) }}></span>
         `}
         ${dl.total_bytes > 0
@@ -164,18 +178,18 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove, onSwitch, switc
               ? html`<span style="color:var(--text-dim)">${dl.num_peers > 0 ? t('dl.loadingMetadata') : t('dl.connectingHost')}</span>`
               : html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`}
         ${checking && html`
-          <span style="color:var(--text-dim);font-size:12px">${t('dl.checkingNote')}</span>
+          <span style="color:var(--text-dim);font-size:13px">${t('dl.checkingNote')}</span>
         `}
         ${dl.phase === 'downloading' && dl.stall_seconds > 20 && html`
-          <span style="color:var(--text-dim);font-size:12px">${t('dl.noDataSince', { seconds: dl.stall_seconds })}</span>
+          <span style="color:var(--text-dim);font-size:13px">${t('dl.noDataSince', { seconds: dl.stall_seconds })}</span>
         `}
         ${sprint && html`<span style="color:var(--accent)">${sprint}</span>`}
         ${pct >= 99.5 && dl.bytes_remaining > 0 && (dl.status === 'downloading' || dl.status === 'verifying') && html`
-          <span style="color:var(--text-dim);font-size:12px">${t('dl.reconnecting')}</span>
+          <span style="color:var(--text-dim);font-size:13px">${t('dl.reconnecting')}</span>
         `}
         ${dl.num_peers >= 1 && (dl.bytes_remaining ?? 0) > 0 && (dl.bytes_remaining ?? 0) < 1024 * 1024
           && (dl.status === 'downloading' || dl.status === 'verifying') && html`
-          <span style="color:var(--text-dim);font-size:12px">${t('dl.lastDataPending')}</span>
+          <span style="color:var(--text-dim);font-size:13px">${t('dl.lastDataPending')}</span>
         `}
       </div>
     </div>`;
@@ -185,6 +199,7 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
   const [loading, setLoading]     = useState(true);
   const [removeTarget, setRemoveTarget] = useState(null);
   const [switchingId, setSwitchingId] = useState(null);
+  useDialogKeys(!!removeTarget, () => setRemoveTarget(null));
 
   const load = async () => {
     try {
@@ -287,7 +302,7 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
     <div class="view">
       <div class="view-header">
         <div>
-          <div class="view-title">${t('dl.title')}</div>
+          <h1 class="view-title">${t('dl.title')}</h1>
           <div class="view-subtitle">${t('dl.active', { count: active.length })}</div>
         </div>
       </div>
@@ -296,7 +311,7 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
         ? html`<div class="empty-state"><div class="spinner"></div></div>`
         : active.length === 0
           ? html`<div class="empty-state">
-              <div class="empty-icon">📥</div>
+              <div class="empty-icon"><${Icon} name="inbox" /></div>
               <div class="empty-title">${t('dl.emptyTitle')}</div>
               <div class="empty-sub">${t('dl.emptySub')}</div>
             </div>`
@@ -332,7 +347,7 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
               ${removeTarget.kind === 'update'
                 ? t('dl.removeUpdateText')
                 : t('dl.removeText')}
-              ${removeTarget.dest_path ? html`<br/><br/><code style="font-size:11px;color:var(--text-dim)">${removeTarget.dest_path}</code>` : null}
+              ${removeTarget.dest_path ? html`<br/><br/><code style="font-size:13px;color:var(--text-dim);overflow-wrap:anywhere">${removeTarget.dest_path}</code>` : null}
             </p>
             <div class="dialog-actions" style="flex-direction:column;align-items:stretch;gap:8px">
               <button type="button" class="btn btn-ghost" onClick=${() => confirmRemove(false)}>
@@ -343,7 +358,7 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
                   ${t('dl.removeAndDelete')}
                 </button>
               `}
-              <button type="button" class="btn btn-ghost" onClick=${() => setRemoveTarget(null)}>
+              <button type="button" class="btn btn-ghost" data-autofocus onClick=${() => setRemoveTarget(null)}>
                 ${t('common.cancel')}
               </button>
             </div>
