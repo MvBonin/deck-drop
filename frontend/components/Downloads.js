@@ -4,6 +4,7 @@ import { api, fmtBytes, fmtSpeed } from '../api.js';
 import { formatApiError, formatTransferError, getTransferHint } from '../errors.js';
 import { t } from '../i18n/index.js';
 import { Icon } from '../icons.js';
+import { useDialogKeys } from '../hooks.js';
 
 const STATUS_LABEL_KEYS = new Set([
   'queued', 'downloading', 'verifying', 'seeding', 'done', 'error', 'paused',
@@ -198,6 +199,7 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
   const [loading, setLoading]     = useState(true);
   const [removeTarget, setRemoveTarget] = useState(null);
   const [switchingId, setSwitchingId] = useState(null);
+  useDialogKeys(!!removeTarget, () => setRemoveTarget(null));
 
   const load = async () => {
     try {
@@ -356,7 +358,7 @@ export function Downloads({ wsEvent, showToast, downloads, setDownloads }) {
                   ${t('dl.removeAndDelete')}
                 </button>
               `}
-              <button type="button" class="btn btn-ghost" onClick=${() => setRemoveTarget(null)}>
+              <button type="button" class="btn btn-ghost" data-autofocus onClick=${() => setRemoveTarget(null)}>
                 ${t('common.cancel')}
               </button>
             </div>

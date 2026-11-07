@@ -6,6 +6,7 @@ import { isDebug, setDebug } from '../debug.js';
 import { AppUpdate } from './AppUpdate.js';
 import { t, LANGUAGES, getLanguage, setLanguage } from '../i18n/index.js';
 import { Icon } from '../icons.js';
+import { useDialogKeys } from '../hooks.js';
 
 export function Settings({ showToast }) {
   const [cfg, setCfg]         = useState(null);
@@ -13,6 +14,7 @@ export function Settings({ showToast }) {
   const [showExit, setShowExit] = useState(false);
   const [exiting, setExiting]   = useState(false);
   const [svc, setSvc]           = useState(null);
+  useDialogKeys(showExit, () => { if (!exiting) setShowExit(false); });
   const [svcLoading, setSvcLoading] = useState(false);
   const [debugOn, setDebugOn]   = useState(isDebug());
 
@@ -342,6 +344,7 @@ export function Settings({ showToast }) {
               <button
                 type="button"
                 class="btn btn-ghost"
+                data-autofocus
                 onClick=${() => setShowExit(false)}
                 disabled=${exiting}
               >

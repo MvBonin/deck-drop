@@ -449,3 +449,94 @@ def test_dpad_reaches_cards_and_their_buttons(page: Page, live_server_url: str) 
     page.keyboard.press("Enter")
     page.keyboard.press("Escape")
     expect(dialog).to_have_count(0)
+
+
+def test_inline_dialogs_close_with_escape_and_hold_focus(page: Page, live_server_url: str) -> None:
+    """Steam Deck B (= Escape) closes the inline dialogs too; while one is
+    open the focus is inside it, afterwards it is back on the opener."""
+    dl = {
+        "id": "d1",
+        "game_id": "g1",
+        "game_name": "Dawnwalker",
+        "peer_id": "pc",
+        "peer_name": "MVB Desktop",
+        "status": "downloading",
+        "progress": 0.4,
+        "speed_bytes_sec": 1000,
+        "downloaded_bytes": 400,
+        "total_bytes": 1000,
+        "num_peers": 1,
+        "phase": "downloading",
+        "kind": "new",
+    }
+    page.route("**/api/downloads", lambda route: route.fulfill(json=[dl]))
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    page.locator("nav.nav").get_by_text("Downloads").click()
+
+    remove = page.get_by_role("button", name="Remove")
+    remove.focus()
+    page.keyboard.press("Enter")
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_be_visible(timeout=10_000)
+    assert page.evaluate("() => !!document.activeElement.closest('.overlay')")
+    page.keyboard.press("Escape")
+    expect(dialog).to_have_count(0)
+    expect(remove).to_be_focused()
+
+    page.locator("nav.nav").get_by_text("Settings").click()
+    quit_btn = page.get_by_role("button", name="Quit DeckDrop")
+    quit_btn.click()
+    expect(page.get_by_role("dialog")).to_be_visible()
+    page.keyboard.press("Escape")
+    expect(page.get_by_role("dialog")).to_have_count(0)
+
+
+def test_enter_picks_a_version_radio(page: Page, live_server_url: str) -> None:
+    """A on the Deck arrives as Enter, which browsers don't use to pick a radio."""
+    versions = [
+        {
+            "version_key": "new",
+            "revision": 2,
+            "version_label": "1.1",
+            "peers": [],
+            "shareable": True,
+            "has_torrent": True,
+        },
+        {
+            "version_key": "old",
+            "revision": 1,
+            "version_label": "1.0",
+            "peers": [],
+            "shareable": True,
+            "has_torrent": True,
+        },
+    ]
+    game = {
+        "id": "n1",
+        "name": "Disco",
+        "peer_id": "pc",
+        "peer_name": "PC",
+        "size_bytes": 1,
+        "platform": "linux",
+        "has_torrent": True,
+        "shareable": True,
+        "versions": versions,
+        "version_count": 2,
+        "peer_count": 1,
+        "peer_names": ["PC"],
+        "installed": False,
+    }
+    page.route("**/api/network/games", lambda route: route.fulfill(json=[game]))
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    page.locator("nav.nav").get_by_text("Network").click()
+    page.get_by_role("article", name="Disco").get_by_role("button", name="Download").click()
+
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_be_visible(timeout=10_000)
+    radios = dialog.get_by_role("radio")
+    expect(radios.nth(0)).to_be_focused()  # the preselected version
+    radios.nth(1).focus()
+    page.keyboard.press("Enter")
+    expect(radios.nth(1)).to_be_checked()
+    page.keyboard.press("Escape")
+    expect(dialog).to_have_count(0)

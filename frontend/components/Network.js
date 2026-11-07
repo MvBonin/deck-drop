@@ -8,6 +8,7 @@ import { VersionList } from './VersionList.js';
 import { UpdateGame } from './UpdateGame.js';
 import { t } from '../i18n/index.js';
 import { Icon } from '../icons.js';
+import { useDialogKeys } from '../hooks.js';
 
 export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   const [games, setGames]     = useState([]);
@@ -17,6 +18,7 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
   const [commentsGame, setCommentsGame] = useState(null);
   const [versionGame, setVersionGame] = useState(null); // game whose version picker is open
   const [chosenVersionKey, setChosenVersionKey] = useState(null);
+  useDialogKeys(!!versionGame, () => setVersionGame(null));
   const [updateGame, setUpdateGame] = useState(null); // locally installed game to update
   const [query, setQuery]     = useState('');
 

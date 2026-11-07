@@ -46,7 +46,12 @@ export function VersionList({ versions, value, onChange }) {
               checked=${selected}
               disabled=${disabled}
               onChange=${() => onChange?.(v.version_key)}
-              style="margin-top:3px"
+              onKeyDown=${e => {
+                // A on the Steam Deck arrives as Enter, which doesn't pick a radio.
+                if (e.key === 'Enter' && !disabled) { e.preventDefault(); onChange?.(v.version_key); }
+              }}
+              data-autofocus=${selected ? '' : undefined}
+              style="margin-top:3px;width:20px;height:20px;accent-color:var(--accent)"
             />
             <div style="flex:1;min-width:0">
               <div style="display:flex;align-items:center;gap:6px;font-weight:500">
