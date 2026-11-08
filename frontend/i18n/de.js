@@ -216,6 +216,7 @@ export default {
   'game.edit': 'Spiel bearbeiten',
   'game.folderPath': 'Spielordner-Pfad',
   'game.folderPlaceholder': '/home/user/Games/MeinSpiel',
+  'game.invalidTomlReplace': 'Beim Hinzufügen wird sie durch eine neue Datei ersetzt (die alte bleibt als Sicherung erhalten).',
   'game.launchArgs': 'Launch-Argumente (optional)',
   'game.launchExe': 'Launch-Exe (optional, für Steam-Shortcut)',
   'game.launchExePlaceholder': '/pfad/zum/spiel.exe',
@@ -237,6 +238,9 @@ export default {
 
   'myGames.add': 'Spiel hinzufügen',
   'myGames.added': '„{name}“ hinzugefügt – Game-Hashes werden berechnet…',
+  'myGames.brokenHint': 'Füge das Spiel neu hinzu, um eine neue Datei anzulegen.',
+  'myGames.brokenReadd': 'Neu hinzufügen…',
+  'myGames.brokenTitle': '„{name}“ konnte nicht geladen werden',
   'myGames.emptySub': 'Füge deinen ersten Spielordner hinzu, um ihn im LAN zu teilen.',
   'myGames.emptyTitle': 'Noch keine Spiele',
   'myGames.hashFailed': 'Game-Hashes fehlgeschlagen: {error}',

@@ -1,7 +1,7 @@
 import { html } from 'htm/preact';
 import { useState, useEffect, useRef, useLayoutEffect } from 'preact/hooks';
 import { api } from '../api.js';
-import { formatApiError } from '../errors.js';
+import { apiErrorCode, formatApiError, parseFastApiDetail } from '../errors.js';
 import { t } from '../i18n/index.js';
 import { Icon } from '../icons.js';
 import { MetadataPicker, MetadataChoice } from './MetadataPicker.js';
@@ -64,9 +64,9 @@ function FolderBrowser({ start, onPick, onCancel }) {
     </div>`;
 }
 
-export function AddGame({ onClose, onAdded }) {
-  const [path, setPath]           = useState('');
-  const [name, setName]           = useState('');
+export function AddGame({ onClose, onAdded, initialPath = '' }) {
+  const [path, setPath]           = useState(initialPath);
+  const [name, setName]           = useState(folderName(initialPath));
   const [nameTouched, setTouched] = useState(false);
   const [browsing, setBrowsing]   = useState(false);
   const [platform, setPlatform]   = useState('any');
@@ -76,6 +76,8 @@ export function AddGame({ onClose, onAdded }) {
   const [meta, setMeta]           = useState(undefined);
   const [picking, setPicking]     = useState(true);
   const [needsWizard, setNeeds]   = useState(false);
+  // Set when the folder has a deckdrop.toml that can't be read (server message)
+  const [invalidToml, setInvalid] = useState('');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const firstRef = useRef(null);
@@ -96,6 +98,7 @@ export function AddGame({ onClose, onAdded }) {
   const changePath = (value) => {
     setPath(value);
     setNeeds(false);
+    setInvalid('');
     setError('');
     setMeta(undefined);
     setPicking(true);
@@ -120,8 +123,9 @@ export function AddGame({ onClose, onAdded }) {
       onAdded(game);
     } catch (err) {
       if (err.status === 422 && !needsWizard) {
-        // No deckdrop.toml → show the wizard
+        // No (or an invalid) deckdrop.toml → show the wizard
         setNeeds(true);
+        setInvalid(apiErrorCode(err) === 'toml_invalid' ? parseFastApiDetail(err.body) : '');
         setError('');
       } else {
         setError(formatApiError(err, 'game'));
@@ -174,8 +178,10 @@ export function AddGame({ onClose, onAdded }) {
             />`}
 
           ${needsWizard && html`
-            <p style="font-size:13px;color:var(--text-dim)"
-              dangerouslySetInnerHTML=${{ __html: t('game.noToml') }}></p>
+            ${invalidToml
+              ? html`<p class="dl-notice">${invalidToml}. ${t('game.invalidTomlReplace')}</p>`
+              : html`<p style="font-size:13px;color:var(--text-dim)"
+                  dangerouslySetInnerHTML=${{ __html: t('game.noToml') }}></p>`}
             <div class="form-group">
               <span class="form-label">${t('meta.title')}</span>
               ${picking

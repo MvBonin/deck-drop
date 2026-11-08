@@ -256,6 +256,21 @@ def list_games() -> list[GameOut]:
     return [GameOut.from_info(g) for g in s.library.all()]
 
 
+class BrokenGameOut(BaseModel):
+    path: str
+    error: str
+
+
+@router.get("/games/broken", response_model=list[BrokenGameOut], dependencies=[Depends(local_only)])
+def list_broken_games() -> list[BrokenGameOut]:
+    """Game folders whose deckdrop.toml couldn't be read on the last reload."""
+    s = app_state.get()
+    return [
+        BrokenGameOut(path=str(p), error=t("err.toml_invalid", error=reason))
+        for p, reason in sorted(s.library.broken().items())
+    ]
+
+
 @router.get("/games/{game_id}", response_model=GameOut)
 def get_game(game_id: str) -> GameOut:
     s = app_state.get()
@@ -273,12 +288,34 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
     if not path.is_dir():
         raise HTTPException(400, t("err.not_a_directory", path=path))
 
-    if s.library.needs_wizard(path):
+    loaded: GameInfo | None = None
+    broken: game_mod.InvalidGameToml | None = None
+    if not s.library.needs_wizard(path):
+        try:
+            loaded = game_mod.load_from_path(path)
+        except game_mod.InvalidGameToml as exc:
+            broken = exc
+        if loaded is None and broken is None:
+            raise HTTPException(500, t("err.toml_load_failed"))
+
+    if loaded is None:
         if not req.name:
+            if broken is not None:
+                # The UI shows the wizard with this reason; adding with a
+                # name then replaces the file (the old one is backed up).
+                raise HTTPException(
+                    422,
+                    {
+                        "code": "toml_invalid",
+                        "message": t("err.toml_invalid", error=broken.reason),
+                    },
+                )
             raise HTTPException(
                 422,
                 "No deckdrop.toml found. Provide 'name' to create one (wizard mode).",
             )
+        if broken is not None:
+            game_mod.backup_toml(broken.path)
         info = game_mod.create_new(
             game_path=path,
             name=req.name,
@@ -290,9 +327,6 @@ def add_game(req: AddGameRequest, background_tasks: BackgroundTasks) -> GameOut:
             info.description = req.description.strip()
         game_mod.save(info)
     else:
-        loaded = game_mod.load_from_path(path)
-        if not loaded:
-            raise HTTPException(500, t("err.toml_load_failed"))
         info = loaded
 
     # Register path in config if it's outside the download_dir

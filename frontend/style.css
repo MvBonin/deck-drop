@@ -530,6 +530,12 @@ textarea.form-input { min-height: 0; line-height: 1.5; }
   line-height: 1.5;
 }
 
+/* Games skipped because their deckdrop.toml is invalid (My Games) */
+.broken-games { display: flex; flex-direction: column; gap: var(--s-2); padding: 0 var(--gut) var(--s-3); }
+.broken-game { display: flex; gap: var(--s-3); align-items: center; justify-content: space-between; }
+.broken-game .btn { width: auto; flex-shrink: 0; }
+.broken-path { font-family: monospace; font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+
 /* ── Metadata picker (Add / Edit game) ────────────────────────── */
 .meta-picker { display: flex; flex-direction: column; gap: var(--s-2); }
 .meta-results {
