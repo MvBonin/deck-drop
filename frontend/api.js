@@ -24,6 +24,7 @@ const del  = (path)        => req('DELETE', path);
 export const api = {
   status:       ()          => get('/api/status'),
   games:        ()          => get('/api/games'),
+  brokenGames:  ()          => get('/api/games/broken'),
   getGame:      (id)        => get(`/api/games/${id}`),
   addGame:      (body)      => post('/api/games', body),
   browse:       (path)      => get(`/api/fs/browse?path=${encodeURIComponent(path || '')}`),

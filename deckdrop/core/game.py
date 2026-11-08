@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import secrets
+import shutil
 import tomllib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -11,7 +14,21 @@ from typing import Any
 
 import tomli_w
 
+log = logging.getLogger(__name__)
+
 TOML_FILENAME = "deckdrop.toml"
+PLATFORMS = ("linux", "windows", "any")
+# IDs end up in file names (torrent cache, content state) and URLs.
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+class InvalidGameToml(ValueError):
+    """deckdrop.toml exists but can't be used; the game has to be added again."""
+
+    def __init__(self, path: Path, reason: str) -> None:
+        super().__init__(f"{path}: {reason}")
+        self.path = path
+        self.reason = reason
 
 
 @dataclass
@@ -189,18 +206,181 @@ def _read_toml(toml_path: Path) -> dict[str, Any] | None:
     cached = _toml_cache.get(toml_path)
     if cached is not None and cached[0] == key:
         return cached[1]
-    with toml_path.open("rb") as f:
-        data = tomllib.load(f)
+    try:
+        with toml_path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        raise InvalidGameToml(toml_path, str(exc)) from None
+    except UnicodeDecodeError:
+        raise InvalidGameToml(toml_path, "not UTF-8 text") from None
+    except OSError as exc:
+        raise InvalidGameToml(toml_path, exc.strerror or str(exc)) from None
+    if not isinstance(data.get("game"), dict):
+        raise InvalidGameToml(toml_path, "missing [game] section")
     _toml_cache[toml_path] = (key, data)
     return data
 
 
+def _str(v: Any) -> bool:
+    return isinstance(v, str)
+
+
+def _int(v: Any, minimum: int) -> int | None:
+    """v as an int >= minimum ("3" counts), else None."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, str) and v.strip().isdigit():
+        v = int(v.strip())
+    return v if isinstance(v, int) and v >= minimum else None
+
+
+def _sanitize(data: dict[str, Any], game_path: Path) -> list[str]:
+    """Fix wrong types / missing values in a parsed deckdrop.toml in place.
+
+    Returns what was repaired (empty if the file was fine). Keeps the game ID
+    when it is usable, so peers still recognise the game.
+    """
+    fixes: list[str] = []
+
+    def table(parent: dict[str, Any], key: str, label: str) -> dict[str, Any]:
+        v = parent.get(key)
+        if v is None:
+            return {}
+        if not isinstance(v, dict):
+            fixes.append(f"[{label}] is not a table")
+            parent.pop(key)
+            return {}
+        return v
+
+    def text(t: dict[str, Any], key: str, label: str, default: str = "") -> None:
+        if key in t and not _str(t[key]):
+            fixes.append(f"{label} is not text")
+            t[key] = default
+
+    g = data["game"]
+    if not (_str(g.get("id")) and _ID_RE.match(g["id"])):
+        fixes.append("game.id missing or invalid")
+        g["id"] = _new_id()
+    if not (_str(g.get("name")) and g["name"].strip()):
+        fixes.append("game.name missing")
+        g["name"] = game_path.name
+    for key, minimum, default in (("version", 1, 1), ("size_bytes", 0, 0)):
+        if key in g:
+            n = _int(g[key], minimum)
+            if n is None:
+                fixes.append(f"game.{key} is not a valid number")
+                n = default
+            g[key] = n
+    if "platform" in g and g["platform"] not in PLATFORMS:
+        fixes.append("game.platform is unknown")
+        g["platform"] = "any"
+    for key in ("added_at", "added_by", "updated_at", "updated_by", "description", "launch_exe"):
+        text(g, key, f"game.{key}")
+
+    steam = table(data, "steam", "steam")
+    if "app_id" in steam:
+        app_id = _int(steam["app_id"], 1)
+        if app_id is None:
+            fixes.append("steam.app_id is not a valid number")
+            steam.pop("app_id")
+        else:
+            steam["app_id"] = app_id
+    for key in ("install_dir", "launch_args", "runner"):
+        text(steam, key, f"steam.{key}")
+    torrent = table(data, "torrent", "torrent")
+    for key in ("info_hash", "magnet"):
+        text(torrent, key, f"torrent.{key}")
+    origin = table(data, "origin", "origin")
+    for key in ("peer_id", "peer_name"):
+        text(origin, key, f"origin.{key}")
+
+    files = table(data, "files", "files")
+    bad = [k for k, v in files.items() if not _str(v)]
+    if bad:
+        fixes.append(f"{len(bad)} invalid file hash(es)")
+        for k in bad:
+            files.pop(k)
+    sizes = table(data, "sizes", "sizes")
+    bad = [k for k, v in sizes.items() if _int(v, 0) is None]
+    if bad:
+        fixes.append(f"{len(bad)} invalid file size(s)")
+        for k in bad:
+            sizes.pop(k)
+
+    if "content" in data:
+        content = table(data, "content", "content")
+        if "content" in data:
+            if "revision" in content and _int(content["revision"], 1) is None:
+                fixes.append("content.revision is not a valid number")
+                content["revision"] = 1
+            for key in (
+                "version_label",
+                "note",
+                "created_by",
+                "created_at",
+                "updated_by",
+                "updated_at",
+                "content_hash",
+            ):
+                text(content, key, f"content.{key}")
+            ignore = content.get("ignore", [])
+            if not (isinstance(ignore, list) and all(_str(x) for x in ignore)):
+                fixes.append("content.ignore is not a list of text")
+                content["ignore"] = (
+                    [x for x in ignore if _str(x)] if isinstance(ignore, list) else []
+                )
+
+    history = data.get("history", [])
+    if not isinstance(history, list):
+        fixes.append("[[history]] is not a list")
+        data.pop("history")
+    else:
+        kept = [h for h in history if isinstance(h, dict)]
+        for h in kept:
+            if "revision" in h and _int(h["revision"], 1) is None:
+                h["revision"] = 1
+                fixes.append("history.revision is not a valid number")
+            for key in ("version_label", "note", "by", "at", "content_hash"):
+                text(h, key, f"history.{key}")
+        if len(kept) != len(history):
+            fixes.append("invalid [[history]] entries")
+            data["history"] = kept
+    return fixes
+
+
+def backup_dir() -> Path:
+    """Where replaced/repaired deckdrop.toml files are kept (outside the game
+    folder, so they don't end up in the torrent or the content hash)."""
+    from deckdrop.core import config as cfg_mod
+
+    return cfg_mod.CONFIG_PATH.parent / "toml-backups"
+
+
+def backup_toml(toml_path: Path) -> Path | None:
+    """Copy deckdrop.toml aside before overwriting it. None if that failed."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    dest = backup_dir() / f"{toml_path.parent.name}-{stamp}.toml"
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(toml_path, dest)
+    except OSError as exc:
+        log.warning("Could not back up %s: %s", toml_path, exc)
+        return None
+    return dest
+
+
 def load_from_path(game_path: Path) -> GameInfo | None:
-    """Load GameInfo from a folder that contains deckdrop.toml. Returns None if missing."""
+    """Load GameInfo from a folder that contains deckdrop.toml. Returns None if missing.
+
+    Fixable mistakes (wrong types, missing ID/name, …) are repaired and written
+    back once; the original is kept in backup_dir(). Raises InvalidGameToml if
+    the file can't be read at all.
+    """
     toml_path = game_path / TOML_FILENAME
     data = _read_toml(toml_path)
     if data is None:
         return None
+    fixes = _sanitize(data, game_path)
 
     g = data.get("game", {})
     steam_data = data.get("steam", {})
@@ -249,8 +429,8 @@ def load_from_path(game_path: Path) -> GameInfo | None:
             for h in history_data
         ]
 
-    return GameInfo(
-        id=g.get("id", _new_id()),
+    info = GameInfo(
+        id=g["id"],
         name=g.get("name", game_path.name),
         version=g.get("version", 1),
         added_at=g.get("added_at", _now()),
@@ -282,6 +462,15 @@ def load_from_path(game_path: Path) -> GameInfo | None:
         content=content,
         history=history,
     )
+    if fixes:
+        log.warning("Repaired %s: %s", toml_path, "; ".join(fixes))
+        backup = backup_toml(toml_path)
+        if backup is not None:
+            try:
+                save(info)
+            except OSError as exc:
+                log.warning("Could not write repaired %s: %s", toml_path, exc)
+    return info
 
 
 def create_new(

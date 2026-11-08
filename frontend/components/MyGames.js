@@ -3,7 +3,7 @@ import { useState, useEffect } from 'preact/hooks';
 import { api } from '../api.js';
 import { formatApiError } from '../errors.js';
 import { GameCard } from './GameCard.js';
-import { AddGame } from './AddGame.js';
+import { AddGame, folderName } from './AddGame.js';
 import { EditGame } from './EditGame.js';
 import { Comments } from './Comments.js';
 import { PublishUpdate } from './PublishUpdate.js';
@@ -18,6 +18,8 @@ export function MyGames({ wsEvent, showToast }) {
   const [updateProgress, setUpdateProgress] = useState({});
   const [loading, setLoading]   = useState(true);
   const [showAdd, setShowAdd]         = useState(false);
+  const [addPath, setAddPath]         = useState('');
+  const [broken, setBroken]           = useState([]);
   const [editGame, setEditGame]       = useState(null);
   const [commentsGame, setCommentsGame] = useState(null);
   const [publishGame, setPublishGame] = useState(null);
@@ -39,6 +41,8 @@ export function MyGames({ wsEvent, showToast }) {
       const list = await api.games();
       setGames(list);
       syncPrepFromGames(list);
+      // Filled by the reload above: folders with an unreadable deckdrop.toml
+      setBroken(await api.brokenGames().catch(() => []));
     } catch {}
     finally { setLoading(false); }
   };
@@ -203,11 +207,26 @@ export function MyGames({ wsEvent, showToast }) {
           <div class="view-subtitle">${t('myGames.shared', { count: games.length })}</div>
         </div>
         <div class="view-actions">
-          <button class="btn btn-primary" onClick=${() => setShowAdd(true)}>
+          <button class="btn btn-primary" onClick=${() => { setAddPath(''); setShowAdd(true); }}>
             <${Icon} name="plus" />${t('myGames.add')}
           </button>
         </div>
       </div>
+
+      ${broken.length > 0 && html`
+        <div class="broken-games" role="alert">
+          ${broken.map(b => html`
+            <div class="dl-notice broken-game" key=${b.path}>
+              <div>
+                <strong>${t('myGames.brokenTitle', { name: folderName(b.path) })}</strong>
+                <div class="broken-path">${b.path}</div>
+                <div>${b.error}. ${t('myGames.brokenHint')}</div>
+              </div>
+              <button class="btn btn-secondary" onClick=${() => { setAddPath(b.path); setShowAdd(true); }}>
+                ${t('myGames.brokenReadd')}
+              </button>
+            </div>`)}
+        </div>`}
 
       ${loading
         ? html`<div class="empty-state"><div class="spinner"></div></div>`
@@ -237,7 +256,7 @@ export function MyGames({ wsEvent, showToast }) {
             </div>`
       }
 
-      ${showAdd && html`<${AddGame} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
+      ${showAdd && html`<${AddGame} initialPath=${addPath} onClose=${() => setShowAdd(false)} onAdded=${onAdded} />`}
       ${editGame && html`<${EditGame} game=${editGame} onClose=${() => setEditGame(null)} onSaved=${onSaved} onGameUpdated=${onGameUpdated} />`}
       ${commentsGame && html`<${Comments} game=${commentsGame} onClose=${() => setCommentsGame(null)} />`}
       ${publishGame && html`

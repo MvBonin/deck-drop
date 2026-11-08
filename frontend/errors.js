@@ -12,6 +12,7 @@ export function parseFastApiDetail(body) {
       const data = JSON.parse(trimmed);
       const d = data.detail;
       if (typeof d === 'string') return d;
+      if (d && typeof d.message === 'string') return d.message;
       if (Array.isArray(d)) {
         return d.map((e) => e.msg || String(e)).join('; ');
       }
@@ -62,6 +63,15 @@ const CONTEXT_MAP = {
   // Folder browser: the server's (translated) detail is already the message.
   fs: {},
 };
+
+/** `code` of a structured error detail ({"detail": {"code": …}}), else ''. */
+export function apiErrorCode(err) {
+  try {
+    return JSON.parse(err?.body || '').detail?.code || '';
+  } catch {
+    return '';
+  }
+}
 
 /**
  * Turn a failed api.req() error into a short user message (current language).

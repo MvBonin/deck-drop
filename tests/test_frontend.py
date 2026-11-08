@@ -540,3 +540,33 @@ def test_enter_picks_a_version_radio(page: Page, live_server_url: str) -> None:
     expect(radios.nth(1)).to_be_checked()
     page.keyboard.press("Escape")
     expect(dialog).to_have_count(0)
+
+
+def test_broken_toml_notice_and_readd(page: Page, live_server_url: str) -> None:
+    """A folder with an invalid deckdrop.toml is listed with "Add again…", which
+    opens the wizard for that folder and says the file gets replaced."""
+    broken = [
+        {
+            "path": "/home/deck/Games/Celeste",
+            "error": "deckdrop.toml is invalid (Expected ']' (at line 1, column 6))",
+        }
+    ]
+    page.route("**/api/games/broken", lambda route: route.fulfill(json=broken))
+
+    def games(route):
+        if route.request.method == "POST":
+            detail = {"code": "toml_invalid", "message": broken[0]["error"]}
+            route.fulfill(status=422, json={"detail": detail})
+        else:
+            route.fulfill(json=[])
+
+    page.route("**/api/games", games)
+    page.goto(live_server_url, wait_until="domcontentloaded")
+
+    expect(page.get_by_text("“Celeste” could not be loaded")).to_be_visible(timeout=10_000)
+    page.get_by_role("button", name="Add again…").click()
+    expect(page.get_by_placeholder("/home/user/Games/MyGame")).to_have_value(
+        "/home/deck/Games/Celeste"
+    )
+    page.get_by_role("button", name="Add", exact=True).click()
+    expect(page.get_by_text("old one is kept as a backup")).to_be_visible(timeout=10_000)

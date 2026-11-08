@@ -10,7 +10,7 @@ from pathlib import Path
 
 from deckdrop.core import game as game_mod
 from deckdrop.core.config import Config
-from deckdrop.core.game import GameInfo
+from deckdrop.core.game import GameInfo, InvalidGameToml
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 class Library:
     def __init__(self) -> None:
         self._games: dict[str, GameInfo] = {}  # id → GameInfo
+        # Folders whose deckdrop.toml can't be read → reason (must be re-added)
+        self._broken: dict[Path, str] = {}
 
     # -- loading --
 
@@ -29,21 +31,30 @@ class Library:
     ) -> None:
         """Scan all configured paths and refresh the in-memory library."""
         found: dict[str, GameInfo] = {}
+        broken: dict[Path, str] = {}
         excluded = exclude_paths or frozenset()
+
+        def load(path: Path) -> GameInfo | None:
+            try:
+                return game_mod.load_from_path(path)
+            except InvalidGameToml as exc:
+                log.warning("Invalid deckdrop.toml: %s", exc)
+                broken[path] = exc.reason
+                return None
 
         # 1. Scan every subdirectory of download_dir
         download_dir = cfg.download_dir
         if download_dir.exists():
             for subdir in sorted(download_dir.iterdir()):
                 if subdir.is_dir() and subdir.resolve() not in excluded:
-                    info = game_mod.load_from_path(subdir)
+                    info = load(subdir)
                     if info:
                         info.available = True
                         found[info.id] = info
 
         # 2. Individual game paths
         for gpath in cfg.game_paths:
-            info = game_mod.load_from_path(gpath)
+            info = load(gpath)
             if info:
                 info.available = gpath.exists()
                 found[info.id] = info
@@ -52,9 +63,14 @@ class Library:
                 pass
 
         self._games = found
+        self._broken = broken
 
     def all(self) -> list[GameInfo]:
         return list(self._games.values())
+
+    def broken(self) -> dict[Path, str]:
+        """Game folders skipped on the last reload because of an invalid deckdrop.toml."""
+        return dict(self._broken)
 
     def get(self, game_id: str) -> GameInfo | None:
         return self._games.get(game_id)

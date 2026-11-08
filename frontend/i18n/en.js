@@ -216,6 +216,7 @@ export default {
   'game.edit': 'Edit game',
   'game.folderPath': 'Game folder path',
   'game.folderPlaceholder': '/home/user/Games/MyGame',
+  'game.invalidTomlReplace': 'Adding replaces it with a new file (the old one is kept as a backup).',
   'game.launchArgs': 'Launch arguments (optional)',
   'game.launchExe': 'Launch exe (optional, for Steam shortcut)',
   'game.launchExePlaceholder': '/path/to/game.exe',
@@ -237,6 +238,9 @@ export default {
 
   'myGames.add': 'Add game',
   'myGames.added': '“{name}” added – computing game hashes…',
+  'myGames.brokenHint': 'Add the game again to create a new file.',
+  'myGames.brokenReadd': 'Add again…',
+  'myGames.brokenTitle': '“{name}” could not be loaded',
   'myGames.emptySub': 'Add your first game folder to share it on the LAN.',
   'myGames.emptyTitle': 'No games yet',
   'myGames.hashFailed': 'Game hashes failed: {error}',
