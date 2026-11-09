@@ -28,6 +28,9 @@ const ACTIVE_DOWNLOAD_STATUSES = new Set([
  * file check used to look like a frozen download.
  */
 function statusLabel(dl) {
+  // Backend is still asking the host for the torrent (can take a while if
+  // the host is still hashing the game).
+  if (dl.phase === 'starting') return t('dl.starting');
   if (dl.phase === 'preparing') {
     // Update: reading the files already on disk to find reusable pieces.
     const pct = Math.round((dl.phase_progress || 0) * 100);
@@ -92,7 +95,9 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove, onSwitch, switc
   const statusColor = checking
     ? 'var(--accent)'
     : STATUS_COLOR[dl.status] || 'var(--text-dim)';
-  const canPause = dl.status === 'downloading' || dl.status === 'queued' || dl.phase === 'preparing';
+  const starting = dl.phase === 'starting';
+  const canPause = !starting
+    && (dl.status === 'downloading' || dl.status === 'queued' || dl.phase === 'preparing');
   const canResume = dl.status === 'paused';
   const canRetry = dl.status === 'error';
   const canRemove = true;
@@ -175,7 +180,7 @@ function DownloadRow({ dl, onPause, onResume, onRetry, onRemove, onSwitch, switc
           : dl.downloaded_bytes > 0
             ? html`<span>${t('dl.downloaded', { size: fmtBytes(dl.downloaded_bytes) })}</span>`
             : (dl.status === 'queued' || dl.status === 'downloading')
-              ? html`<span style="color:var(--text-dim)">${dl.num_peers > 0 ? t('dl.loadingMetadata') : t('dl.connectingHost')}</span>`
+              ? html`<span style="color:var(--text-dim)">${starting ? t('dl.startingHint') : dl.num_peers > 0 ? t('dl.loadingMetadata') : t('dl.connectingHost')}</span>`
               : html`<span>${fmtBytes(dl.downloaded_bytes)} / ${fmtBytes(dl.total_bytes)}</span>`}
         ${checking && html`
           <span style="color:var(--text-dim);font-size:13px">${t('dl.checkingNote')}</span>

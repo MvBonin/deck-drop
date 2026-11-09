@@ -31,6 +31,7 @@ function App() {
   const [debug, setDebugState]    = useState(isDebug());
   const [lang, setLang]           = useState(null);
   const toastTimer = useRef(null);
+  const showToastRef = useRef(null);
 
   // Settings badge: newer DeckDrop on a LAN peer (checked locally, no
   // internet) or found by the last manual GitHub check.
@@ -69,6 +70,14 @@ function App() {
     });
   }, []);
 
+  // Known downloads from the start – the network page greys out "Laden"
+  // for games already downloading, even before the downloads page was opened.
+  useEffect(() => {
+    api.downloads()
+      .then(list => setDownloads(list.filter(d => ACTIVE_DL.has(d.status))))
+      .catch(() => {});
+  }, []);
+
   // -- Initial status fetch --
   useEffect(() => {
     api.status()
@@ -87,6 +96,14 @@ function App() {
         setWsEvent(msg);
         if (msg.event === 'download_progress') {
           mergeDownload(msg.data);
+        }
+        if (msg.event === 'download_start_failed') {
+          // The host never answered (or refused) – drop the placeholder row.
+          setDownloads(prev => prev.filter(d => d.id !== msg.data.id));
+          showToastRef.current?.(t('dl.startFailed', {
+            name: msg.data.game_name,
+            error: msg.data.error || t('errors.hostUnreachable'),
+          }));
         }
         if (msg.event === 'download_complete' && isRealDownloadComplete(msg.data)) {
           setDownloads(prev => {
@@ -112,6 +129,7 @@ function App() {
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(''), 2200);
   }, []);
+  showToastRef.current = showToast;
 
   const onboardingDone = (name, language) => {
     setStatus(s => ({ ...s, onboarding_complete: true, name, language }));
@@ -131,7 +149,7 @@ function App() {
 
   const views = {
     games:     html`<${MyGames}    wsEvent=${wsEvent} showToast=${showToast} />`,
-    network:   html`<${Network}    wsEvent=${wsEvent} showToast=${showToast} onNavigate=${setView} onDownloadStarted=${mergeDownload} />`,
+    network:   html`<${Network}    wsEvent=${wsEvent} showToast=${showToast} onNavigate=${setView} onDownloadStarted=${mergeDownload} downloads=${downloads} />`,
     downloads: html`<${Downloads}  wsEvent=${wsEvent} showToast=${showToast} downloads=${downloads} setDownloads=${setDownloads} />`,
     settings:  html`<${Settings}   showToast=${showToast} />`,
     debug:     debug ? html`<${Debug} wsEvent=${wsEvent} />` : null,
