@@ -570,3 +570,64 @@ def test_broken_toml_notice_and_readd(page: Page, live_server_url: str) -> None:
     )
     page.get_by_role("button", name="Add", exact=True).click()
     expect(page.get_by_text("old one is kept as a backup")).to_be_visible(timeout=10_000)
+
+
+def test_download_shows_at_once_and_greys_out_network_button(
+    page: Page, live_server_url: str
+) -> None:
+    """The start answers before the host does: the row is there right away
+    ("Preparing download…") and "Download" on the network page turns into a
+    disabled "Downloading…" – a second click used to add the game twice."""
+    game = {
+        "id": "n2",
+        "name": "Lantern",
+        "peer_id": "pc",
+        "peer_name": "PC",
+        "size_bytes": 1,
+        "platform": "linux",
+        "has_torrent": True,
+        "shareable": True,
+        "versions": [],
+        "version_count": 1,
+        "peer_count": 1,
+        "installed": False,
+    }
+    placeholder = {
+        "id": "p1",
+        "game_id": "n2",
+        "game_name": "Lantern",
+        "peer_id": "pc",
+        "peer_name": "PC",
+        "status": "queued",
+        "progress": 0.0,
+        "speed_bytes_sec": 0,
+        "downloaded_bytes": 0,
+        "total_bytes": 0,
+        "num_peers": 0,
+        "phase": "starting",
+    }
+    listed: list[dict] = []
+    posts: list[int] = []
+
+    def _start(route):
+        posts.append(1)
+        listed[:] = [placeholder]
+        route.fulfill(status=202, json=placeholder)
+
+    page.route("**/api/network/games", lambda route: route.fulfill(json=[game]))
+    page.route("**/api/downloads", lambda route: route.fulfill(json=listed))
+    page.route("**/api/download", _start)
+    page.goto(live_server_url, wait_until="domcontentloaded")
+    nav = page.locator("nav.nav")
+    nav.get_by_text("Network").click()
+    page.get_by_role("article", name="Lantern").get_by_role("button", name="Download").click()
+
+    expect(page.locator(".download-name", has_text="Lantern")).to_be_visible(timeout=10_000)
+    expect(page.get_by_text("Preparing download…")).to_be_visible()
+    expect(page.get_by_role("button", name="Pause")).to_have_count(0)
+
+    nav.get_by_text("Network").click()
+    button = page.get_by_role("article", name="Lantern").get_by_role("button", name="Downloading…")
+    expect(button).to_be_visible(timeout=10_000)
+    expect(button).to_be_disabled()
+    assert len(posts) == 1

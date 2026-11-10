@@ -26,7 +26,7 @@ function CoverImage({ game, mode = 'own' }) {
 
 export function GameCard({
   game, mode = 'own', onAction, onEdit, onComments, onPublish, onUpdate, onRestore, onRepair, onRemove,
-  disabled, prepProgress, updateProgress,
+  disabled, downloading, prepProgress, updateProgress,
 }) {
   const unavailable = mode === 'own' && !game.available;
   const size = game.size_bytes ? fmtBytes(game.size_bytes) : '–';
@@ -69,7 +69,7 @@ export function GameCard({
   const primary = mode === 'own' ? onEdit : onAction;
   const handleKey = (e) => {
     if (e.target !== e.currentTarget) return; // a button inside the card handles itself
-    if ((e.key === 'Enter' || e.key === ' ') && !disabled && !unavailable) {
+    if ((e.key === 'Enter' || e.key === ' ') && !disabled && !downloading && !unavailable) {
       e.preventDefault();
       primary?.();
     }
@@ -167,9 +167,11 @@ export function GameCard({
             <button
               class=${'btn btn-sm ' + (installedNoUpdate ? 'btn-secondary' : 'btn-primary')}
               onClick=${stop(onAction)}
-              disabled=${disabled || hostPreparing || installedNoUpdate}
+              disabled=${disabled || downloading || hostPreparing || installedNoUpdate}
             >
-              ${hostPreparing
+              ${downloading
+                ? html`<${Icon} name="download" size=${18} />${t('card.downloading')}`
+                : hostPreparing
                 ? t('card.pleaseWait')
                 : installedWithUpdate
                   ? html`<${Icon} name="refresh-cw" size=${18} />${t('card.update')}`

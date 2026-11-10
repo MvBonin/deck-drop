@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
 
 import httpx
@@ -155,58 +156,63 @@ def _status_or_404(transfer: object, download_id: str) -> DownloadOut:
     return _to_out(status)
 
 
-@router.post("/download", response_model=DownloadOut, status_code=202)
-async def start_download(req: StartDownloadRequest) -> DownloadOut:
-    s = _get_transfer_or_503()
+# Downloads whose start is still in flight: the route answers right away
+# and fetches manifest / .torrent / magnet from the host in the background
+# (that can take from seconds up to _MAGNET_PREP_MAX_WAIT). Until the torrent
+# is added these placeholders show up in GET /api/downloads, with the id the
+# real download will get – the UI shows the row at once and a second click
+# on "Laden" finds it instead of starting the game twice.
+_pending_starts: dict[str, DownloadOut] = {}
+_pending_tasks: dict[str, asyncio.Task] = {}
+# Starts whose route already returned the placeholder: a later failure can
+# only reach the UI via WebSocket (otherwise the HTTP error carries it).
+_detached_starts: set[str] = set()
+# How long the route waits for a fast start (host answers at once) before it
+# returns the placeholder instead of the real status.
+_START_GRACE_SECONDS = 0.5
 
-    if s.library.get(req.game_id) is not None:
-        raise HTTPException(409, t("err.already_installed"))
 
-    peer = s.peer_registry.get(req.peer_id)
-    if not peer:
-        raise HTTPException(404, t("err.peer_id_not_found", peer_id=req.peer_id))
+def _pending_for_game(game_id: str) -> DownloadOut | None:
+    return next((p for p in _pending_starts.values() if p.game_id == game_id), None)
 
-    game = next((g for g in peer.games if g["id"] == req.game_id), None)
-    if not game:
-        raise HTTPException(
-            404, t("err.peer_game_id_not_found", game_id=req.game_id, peer_id=req.peer_id)
-        )
 
-    # Which peer(s) actually serve the requested version. Without a
-    # version_key (old clients / recommended version) it's just `peer`.
-    chosen_peer = peer
-    extra_peer_ids: list[str] = []
-    expected_content_hash = ""
+def _active_download_for_game(transfer: object, game_id: str) -> DownloadOut | None:
+    """A first download of `game_id` that is still in the downloads list."""
+    try:
+        statuses = list(transfer.all_statuses())
+    except Exception:
+        return None
+    for st in statuses:
+        if getattr(st, "game_id", None) == game_id and getattr(st, "kind", "new") != "update":
+            try:
+                return _to_out(st)
+            except Exception:
+                return None
+    return None
+
+
+async def _finish_start(
+    s: object,
+    req: StartDownloadRequest,
+    download_id: str,
+    chosen_peer: object,
+    game: dict,
+    dest_path: object,
+    extra_peer_ids: list[str],
+    expected_content_hash: str,
+) -> DownloadOut:
+    """Fetch what the host offers and hand the torrent to libtorrent."""
     manifest: dict | None = None
     torrent_bytes: bytes | None = None
-
-    if req.version_key is not None:
-        version_peers = s.peer_registry.peers_for_version(req.game_id, req.version_key)
-        if not version_peers:
-            raise HTTPException(404, t("err.version_not_found", version=req.version_key))
-        chosen_peer = version_peers[0]
-        extra_peer_ids = [p.peer_id for p in version_peers[1:]]
-        game = next((g for g in chosen_peer.games if g["id"] == req.game_id), game)
-        expected_content_hash = game.get("content_hash") or ""
-
-        manifest = await asyncio.to_thread(
-            _fetch_peer_manifest, chosen_peer.address, chosen_peer.port, req.game_id
-        )
-        torrent_bytes = await asyncio.to_thread(
-            _fetch_peer_torrent, chosen_peer.address, chosen_peer.port, req.game_id
-        )
-
-    dest_path = (s.cfg.download_dir / game.get("name", req.game_id)).resolve()
-    s.transfer.reserve_download_dest(dest_path)
-
-    stale_toml = dest_path / game_mod.TOML_FILENAME
-    if stale_toml.is_file():
-        try:
-            stale_toml.unlink()
-        except OSError as exc:
-            log.warning("Could not remove stale deckdrop.toml at %s: %s", stale_toml, exc)
-
     try:
+        if req.version_key is not None:
+            manifest = await asyncio.to_thread(
+                _fetch_peer_manifest, chosen_peer.address, chosen_peer.port, req.game_id
+            )
+            torrent_bytes = await asyncio.to_thread(
+                _fetch_peer_torrent, chosen_peer.address, chosen_peer.port, req.game_id
+            )
+
         if torrent_bytes is not None:
             try:
                 from deckdrop.core.torrent import make_magnet
@@ -232,8 +238,12 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
             except Exception as exc:
                 raise HTTPException(502, t("err.magnet_fetch", error=exc)) from exc
 
+        if download_id not in _pending_starts:
+            # Removed by the user while we were waiting for the host.
+            raise asyncio.CancelledError
+
         try:
-            download_id = s.transfer.start_download(
+            s.transfer.start_download(
                 game_id=req.game_id,
                 game_name=game.get("name", "Unknown"),
                 magnet=magnet,
@@ -241,6 +251,7 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
                 peer_name=chosen_peer.name,
                 peer_address=chosen_peer.address,
                 dest_path=dest_path,
+                download_id=download_id,
                 torrent_bytes=torrent_bytes,
                 manifest=manifest,
                 extra_peer_ids=extra_peer_ids,
@@ -250,12 +261,125 @@ async def start_download(req: StartDownloadRequest) -> DownloadOut:
             raise HTTPException(500, t("err.download_start_failed", error=exc)) from exc
 
         out = _status_or_404(s.transfer, download_id)
+        _pending_starts.pop(download_id, None)
         if out.status in ("queued", "downloading", "verifying", "paused", "error"):
             await broadcast("download_progress", out.model_dump())
         return out
-    except Exception:
+    except BaseException as exc:
+        placeholder = _pending_starts.pop(download_id, None)
         s.transfer.release_download_dest(dest_path)
+        if not isinstance(exc, asyncio.CancelledError) and download_id in _detached_starts:
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            log.warning("Download start for %s failed: %s", req.game_id, detail)
+            await broadcast(
+                "download_start_failed",
+                {
+                    "id": download_id,
+                    "game_id": req.game_id,
+                    "game_name": placeholder.game_name if placeholder else game.get("name", ""),
+                    "error": detail,
+                },
+            )
         raise
+    finally:
+        _pending_tasks.pop(download_id, None)
+        _detached_starts.discard(download_id)
+
+
+@router.post("/download", response_model=DownloadOut, status_code=202)
+async def start_download(req: StartDownloadRequest) -> DownloadOut:
+    s = _get_transfer_or_503()
+
+    if s.library.get(req.game_id) is not None:
+        raise HTTPException(409, t("err.already_installed"))
+
+    peer = s.peer_registry.get(req.peer_id)
+    if not peer:
+        raise HTTPException(404, t("err.peer_id_not_found", peer_id=req.peer_id))
+
+    game = next((g for g in peer.games if g["id"] == req.game_id), None)
+    if not game:
+        raise HTTPException(
+            404, t("err.peer_game_id_not_found", game_id=req.game_id, peer_id=req.peer_id)
+        )
+
+    # Already starting or downloading this game (double click, or "Laden"
+    # pressed again while the host was still answering): hand back that
+    # download instead of starting a second one into the same folder.
+    existing = _pending_for_game(req.game_id) or _active_download_for_game(s.transfer, req.game_id)
+    if existing is not None:
+        return existing
+
+    # Which peer(s) actually serve the requested version. Without a
+    # version_key (old clients / recommended version) it's just `peer`.
+    chosen_peer = peer
+    extra_peer_ids: list[str] = []
+    expected_content_hash = ""
+
+    if req.version_key is not None:
+        version_peers = s.peer_registry.peers_for_version(req.game_id, req.version_key)
+        if not version_peers:
+            raise HTTPException(404, t("err.version_not_found", version=req.version_key))
+        chosen_peer = version_peers[0]
+        extra_peer_ids = [p.peer_id for p in version_peers[1:]]
+        game = next((g for g in chosen_peer.games if g["id"] == req.game_id), game)
+        expected_content_hash = game.get("content_hash") or ""
+
+    dest_path = (s.cfg.download_dir / game.get("name", req.game_id)).resolve()
+    s.transfer.reserve_download_dest(dest_path)
+
+    stale_toml = dest_path / game_mod.TOML_FILENAME
+    if stale_toml.is_file():
+        try:
+            stale_toml.unlink()
+        except OSError as exc:
+            log.warning("Could not remove stale deckdrop.toml at %s: %s", stale_toml, exc)
+
+    download_id = secrets.token_hex(4)
+    placeholder = DownloadOut(
+        id=download_id,
+        game_id=req.game_id,
+        game_name=game.get("name", "Unknown"),
+        peer_id=chosen_peer.peer_id,
+        peer_name=chosen_peer.name,
+        status="queued",
+        progress=0.0,
+        speed_bytes_sec=0,
+        downloaded_bytes=0,
+        total_bytes=0,
+        num_peers=0,
+        dest_path=str(dest_path),
+        phase="starting",
+    )
+    # Registered before the first await, so a concurrent second request
+    # for the same game already finds it.
+    _pending_starts[download_id] = placeholder
+
+    task = asyncio.create_task(
+        _finish_start(
+            s,
+            req,
+            download_id,
+            chosen_peer,
+            game,
+            dest_path,
+            extra_peer_ids,
+            expected_content_hash,
+        )
+    )
+    _pending_tasks[download_id] = task
+    # Retrieve the exception of a background failure so asyncio doesn't log
+    # "Task exception was never retrieved" – it was broadcast already.
+    task.add_done_callback(lambda tk: tk.cancelled() or tk.exception())
+
+    done, _ = await asyncio.wait({task}, timeout=_START_GRACE_SECONDS)
+    if done:
+        # Fast host: return the real status, or the real error.
+        return task.result()
+
+    _detached_starts.add(download_id)
+    await broadcast("download_progress", placeholder.model_dump())
+    return placeholder
 
 
 @router.post("/downloads/{download_id}/switch-version", response_model=DownloadOut)
@@ -319,7 +443,10 @@ def list_downloads() -> list[DownloadOut]:
     s = app_state.get()
     if s.transfer is None:
         return []
-    return [_to_out(ds) for ds in s.transfer.all_statuses()]
+    out = [_to_out(ds) for ds in s.transfer.all_statuses()]
+    known = {d.id for d in out}
+    out.extend(p for did, p in _pending_starts.items() if did not in known)
+    return out
 
 
 @router.post("/downloads/{download_id}/pause", response_model=DownloadOut)
@@ -352,5 +479,13 @@ def remove_download(
     delete_files: bool = Query(False, description="Delete the game folder on disk"),
 ) -> None:
     s = _get_transfer_or_503()
+    if download_id in _pending_starts:
+        # Still waiting for the host – nothing on disk yet, just stop it.
+        _pending_starts.pop(download_id, None)
+        task = _pending_tasks.pop(download_id, None)
+        if task is not None:
+            # This route runs in the threadpool – cancel on the task's loop.
+            task.get_loop().call_soon_threadsafe(task.cancel)
+        return None
     if not s.transfer.remove_download(download_id, delete_files=delete_files):
         raise HTTPException(404, t("err.download_not_found"))

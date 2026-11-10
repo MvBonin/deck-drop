@@ -10,7 +10,11 @@ import { t } from '../i18n/index.js';
 import { Icon } from '../icons.js';
 import { useDialogKeys } from '../hooks.js';
 
-export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
+// Download states that mean "this game is already on its way" – starting it
+// again would only create a second download into the same folder.
+const BUSY_DL = new Set(['queued', 'downloading', 'verifying', 'paused', 'error']);
+
+export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted, downloads = [] }) {
   const [games, setGames]     = useState([]);
   const [peers, setPeers]     = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,14 +54,21 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
     return () => clearInterval(timer);
   }, [games]);
 
+  const busyGameIds = new Set(
+    downloads.filter(d => BUSY_DL.has(d.status)).map(d => d.game_id),
+  );
+
   const startDownload = async (game, versionKey) => {
+    if (starting || busyGameIds.has(game.id)) return;
     setStarting(`${game.id}:${game.peer_id}`);
-    onNavigate('downloads');
     try {
       const body = { peer_id: game.peer_id, game_id: game.id };
       if (versionKey) body.version_key = versionKey;
+      // Answers right away (the backend fetches from the host in the
+      // background), so the row is there when the downloads page opens.
       const dl = await api.startDl(body);
       onDownloadStarted?.(dl);
+      onNavigate('downloads');
       showToast(t('net.downloadStarted', { name: game.name }));
     } catch (err) {
       showToast(t('common.error', { error: formatApiError(err, 'download') }));
@@ -148,6 +159,7 @@ export function Network({ wsEvent, onNavigate, showToast, onDownloadStarted }) {
                     game=${g}
                     mode="network"
                     disabled=${starting === `${g.id}:${g.peer_id}`}
+                    downloading=${busyGameIds.has(g.id) || starting === `${g.id}:${g.peer_id}`}
                     onAction=${() => handleAction(g)}
                     onComments=${() => setCommentsGame(g)}
                   />
